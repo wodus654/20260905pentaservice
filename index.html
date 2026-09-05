@@ -334,7 +334,7 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
   border:1px solid transparent;border-radius:8px;background:var(--surface-2);cursor:pointer;padding:3px 3px 4px;color:inherit;text-align:left;overflow:hidden}
 .calcell.empty{background:transparent;border:0;cursor:default}
 .calcell:hover:not(.empty){border-color:var(--accent)}
-.calcell.today{background:var(--accent-soft);border-color:var(--accent-line)}
+.calcell.today{background:var(--accent-soft);border-color:var(--accent-line);border-width:2px}
 .calcell.today .calnum{color:var(--accent);font-weight:700}
 .calnum{font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--ink-2);padding-left:1px}
 .caltags{display:flex;flex-direction:column;gap:1px;min-width:0}
@@ -342,11 +342,13 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
 .caltag.cal-pm{background:var(--pm-soft);color:var(--pm)}
 .caltag.cal-acr{background:var(--acr-soft);color:var(--acr)}
 .caltag.cal-sched{background:var(--accent-soft);color:var(--accent)}
+.caltag.cal-log{background:var(--ok-soft);color:var(--ok)}
 .calmore{font-size:9px;color:var(--ink-3);padding-left:3px}
 .caldot{width:5px;height:5px;border-radius:999px;display:inline-block;background:var(--ink-3)}
 .caldot.cal-pm{background:var(--pm)}
 .caldot.cal-acr{background:var(--acr)}
 .caldot.cal-sched{background:var(--accent)}
+.caldot.cal-log{background:var(--ok)}
 .calkey{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;font-size:11.5px;color:var(--ink-2)}
 .calkey span{display:inline-flex;align-items:center;gap:5px}
 
@@ -1137,6 +1139,11 @@ function calendarHtml(){
   const daysInMonth = new Date(y, m, 0).getDate();
   const startWeekday = new Date(y, m-1, 1).getDay(); // 0=일
   const dueMap = calendarDueMap();
+  const logsMap = {};
+  store.logs.filter(l=>!l.deleted && l.date).forEach(l=>{
+    const hname = hospById(l.hospitalId)?.name || l.hospitalName || "—";
+    (logsMap[l.date] = logsMap[l.date] || new Set()).add(hname);
+  });
   const today = todayStr();
   const pad2 = n => String(n).padStart(2,"0");
   let cells = "";
@@ -1146,9 +1153,11 @@ function calendarHtml(){
     const ds = `${y}-${pad2(m)}-${pad2(d)}`;
     const sched = scheduleForDate(ds);
     const due = dueMap[ds]||[];
+    const done = [...(logsMap[ds]||[])];
     const items = [
-      ...due.map(x=>({name:x.hname, cls: x.kind==="PM"?"cal-pm":"cal-acr"})),
-      ...sched.map(s=>({name:s.hospitalName||"—", cls:"cal-sched"})),
+      ...done.map(name=>({name, cls:"cal-log"})),
+      ...due.map(x=>({name:x.hname+" (예정)", cls: x.kind==="PM"?"cal-pm":"cal-acr"})),
+      ...sched.map(s=>({name:(s.hospitalName||"—")+" (예정)", cls:"cal-sched"})),
     ];
     const shown = items.slice(0,MAXTAGS);
     const extra = items.length - shown.length;
@@ -1168,7 +1177,7 @@ function calendarHtml(){
     </div>
     <div class="calgrid calweekdays">${["일","월","화","수","목","금","토"].map(w=>`<div class="calwd">${w}</div>`).join("")}</div>
     <div class="calgrid">${cells}</div>
-    <div class="calkey"><span><span class="caldot cal-pm"></span> PM</span><span><span class="caldot cal-acr"></span> ACR</span><span><span class="caldot cal-sched"></span> 등록한 일정</span></div>
+    <div class="calkey"><span><span class="caldot cal-log"></span> 작성된 일지</span><span><span class="caldot cal-pm"></span> PM 예정</span><span><span class="caldot cal-acr"></span> ACR 예정</span><span><span class="caldot cal-sched"></span> 등록한 일정</span></div>
   </div>`;
 }
 function viewDash(){
