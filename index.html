@@ -2447,7 +2447,9 @@ window.addEventListener("keydown", e=>{
 });
 
 /* ============ boot ============ */
-location.hash = "/dash";
+// location.hash 대입 대신 replaceState 사용 — 대입은 히스토리 항목을 하나 추가해서,
+// 뒤로가기를 눌렀을 때 대시보드가 아니라 그 이전(북마크 등에 저장된 옛 해시)으로 튀는 문제가 있었음.
+history.replaceState(null, "", location.pathname + location.search + "#/dash");
 render();
 initDb();
 setInterval(()=>{ pruneDonePrep(); pruneTrash(); if(parseHash().path==="dash") render(); }, 60000);
