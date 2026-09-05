@@ -1610,7 +1610,7 @@ function openLogForm(id, presetHid){
     <div class="field" data-when="REPAIR COLDHEAD" style="max-width:50%"><label>헬륨 레벨 (%)</label><input type="number" name="heLevel" min="0" max="100" step="0.01" value="${esc(l.heLevel||"")}" placeholder="예: 62.37"></div>
 
     <div class="field" data-when="PM REPAIR COLDHEAD ETC"><label>사진</label>
-      <label class="photoadd">＋ 사진 추가<input type="file" accept="image/*" data-photoinput></label>
+      <label class="photoadd">＋ 사진 추가<input type="file" accept="image/*" multiple data-photoinput></label>
       <div class="thumbs" id="photothumbs"></div>
       <span class="hint">촬영·선택하면 자동으로 축소·압축되어 저장됩니다 (장당 약 150KB).</span>
     </div>
