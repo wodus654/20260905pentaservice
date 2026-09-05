@@ -829,8 +829,9 @@ const $ = (s,r)=> (r||document).querySelector(s);
 const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 const todayStr = () => new Date().toISOString().slice(0,10);
+const WEEKDAY_KO = ["일","월","화","수","목","금","토"];
 function fmtDate(s){ if(!s) return "—"; const d=new Date(s+"T00:00:00"); if(isNaN(d)) return esc(s);
-  return `${d.getFullYear()}. ${d.getMonth()+1}. ${d.getDate()}.`; }
+  return `${d.getFullYear()}. ${d.getMonth()+1}. ${d.getDate()}. (${WEEKDAY_KO[d.getDay()]})`; }
 function relDays(s){ if(!s) return null; const d=new Date(s+"T00:00:00"); if(isNaN(d)) return null;
   return Math.round((d - new Date(todayStr()+"T00:00:00"))/86400000); }
 function addMonths(s,m){ const d=new Date(s+"T00:00:00"); if(isNaN(d))return null; d.setMonth(d.getMonth()+m);
