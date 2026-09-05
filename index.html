@@ -250,8 +250,8 @@ a{color:var(--accent)}
 .pmf input,.pmf select{flex:1;min-width:0;padding:7px 9px;border:1px solid var(--border-strong);border-radius:7px;background:var(--surface);color:var(--ink);font-size:13px}
 .pmf .pmrange{flex:1;display:flex;align-items:center;gap:6px;min-width:0}
 .pmf .pmrange select{flex:1}
-.pmtilde{color:var(--ink-3);font-weight:600}
-.pmsuffix{flex:0 0 auto;font-size:12px;font-weight:600;color:var(--ink-2)}
+.pmrange .pmtilde{color:var(--ink-3);font-weight:600;flex:0 0 auto}
+.pmf .pmsuffix{flex:0 0 auto;font-size:12px;font-weight:600;color:var(--ink-2)}
 .pmf-check{cursor:pointer;justify-content:flex-start;gap:9px;min-width:0}
 .pmf-check span{flex:1 1 auto;order:2;min-width:0;overflow-wrap:break-word}
 .pmf-check input{flex:0 0 auto;order:1;width:20px;height:20px;margin:0;accent-color:var(--accent)}
@@ -1403,13 +1403,42 @@ function viewLogs(){
   </div>`;
 }
 
+/* ============ 뒤로가기(popstate)로 닫히는 오버레이 스택 ============ */
+// 패널·라이트박스 등 화면 위에 뜨는 오버레이가 열릴 때마다 히스토리 항목을 하나 push하고
+// 닫는 함수를 스택에 쌓는다. 폰 뒤로가기 한 번 = 스택 맨 위(가장 최근에 연) 오버레이 하나만 닫힘 —
+// 예: 작업일지 상세(패널) 위에 사진(라이트박스)이 떠 있으면, 뒤로가기 한 번은 사진만 닫고
+// 패널은 그대로 남아있어야 한다. 여러 개가 각자 popstate 리스너를 따로 달면 하나의 뒤로가기에
+// 전부 반응해버리는 문제가 있어서, 리스너는 전역에 하나만 두고 스택으로 관리한다.
+const overlayStack = [];
+let suppressNextPop = false;
+function pushOverlay(onClose){
+  overlayStack.push(onClose);
+  history.pushState({overlay:true}, "");
+}
+// 명시적으로(탭/버튼 클릭) 닫을 때: 정리 작업은 즉시 동기적으로 실행하고,
+// 이미 소비한 히스토리 항목은 popstate 핸들러가 또 처리하지 않도록 표시만 해둔다.
+function popOverlaySync(){
+  const fn = overlayStack.pop();
+  if(fn) fn();
+  suppressNextPop = true;
+  history.back();
+}
+window.addEventListener("popstate", ()=>{
+  if(suppressNextPop){ suppressNextPop = false; return; }
+  const fn = overlayStack.pop();
+  if(fn) fn();
+});
+
 /* ============ panels (forms + detail) ============ */
 const panelRoot = () => $("#panel-root");
-// 패널이 열려있는 동안 히스토리 항목을 하나 push 해서, 폰 뒤로가기가 (엉뚱한 탭으로
-// 튀지 않고) 패널만 닫도록 한다 — 라이트박스와 동일한 패턴.
-let panelPopHandler = null;
+let panelOverlayActive = false;
 function closePanel(){
-  if(panelPopHandler){ window.removeEventListener("popstate", panelPopHandler); panelPopHandler=null; history.back(); }
+  if(panelOverlayActive){
+    panelOverlayActive = false;
+    overlayStack.pop();
+    suppressNextPop = true;
+    history.back();
+  }
   panelRoot().innerHTML=""; document.body.style.overflow=""; render();
 }
 function openPanel(html){
@@ -1421,10 +1450,9 @@ function openPanel(html){
   </div><div class="pbody" id="pbody"></div></div>`;
   $("#pbody").innerHTML = html;
   document.body.style.overflow="hidden";
-  if(!panelPopHandler){
-    panelPopHandler = ()=>{ panelPopHandler=null; closePanelSoft(); render(); };
-    history.pushState({panel:true}, "");
-    window.addEventListener("popstate", panelPopHandler);
+  if(!panelOverlayActive){
+    panelOverlayActive = true;
+    pushOverlay(()=>{ panelOverlayActive=false; closePanelSoft(); render(); });
   }
 }
 function setPanelTitle(t){ const e=$("#panel-title"); if(e) e.textContent=t; }
@@ -1433,12 +1461,9 @@ function openLightbox(src){
   d.className = "lightbox";
   const img = document.createElement("img"); img.src = src; img.alt = "현장 사진";
   d.appendChild(img);
-  function onPop(){ d.remove(); window.removeEventListener("popstate", onPop); }
-  function closeByTap(){ window.removeEventListener("popstate", onPop); d.remove(); history.back(); }
-  d.addEventListener("click", closeByTap);
+  d.addEventListener("click", popOverlaySync);
   document.body.appendChild(d);
-  history.pushState({lightbox:true}, "");
-  window.addEventListener("popstate", onPop);
+  pushOverlay(()=>d.remove());
 }
 // 네이티브 confirm()은 Artifact 샌드박스에서 동작하지 않아 자체 확인창 사용
 function confirmDialog(msg, onYes, opts){
