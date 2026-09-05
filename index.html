@@ -1,5 +1,10 @@
+<!DOCTYPE html>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PENTA SERVICE</title>
 <!-- field service log for MRI engineers -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -846,11 +851,30 @@ function parseHash(){
 function go(path){ location.hash = "#/" + path; }
 
 /* ============ db wiring ============ */
+// claude.ai 아티팩트 안에서는 claude db 기능을, GitHub Pages 등 독립 실행 시에는
+// Firebase Firestore를 사용 — 두 경우 모두 collection().onSnapshot()/.doc().set()/.delete()
+// 모양이 동일해서 saveDoc/deleteDoc 등 나머지 코드는 그대로 재사용된다.
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBK-VAiq9b5ugWFxjefQ4-t-zgkj6IJgfk",
+  authDomain: "pentaservice-3de4c.firebaseapp.com",
+  projectId: "pentaservice-3de4c",
+  storageBucket: "pentaservice-3de4c.firebasestorage.app",
+  messagingSenderId: "804269916430",
+  appId: "1:804269916430:web:52785ef27937a3c15e975f"
+};
 async function initDb(){
   let cap = null;
   try { cap = window.claude && await window.claude.use("db"); } catch(e){ cap = null; }
-  if(!cap){ dbState = "offline"; render(); return; }
-  db = cap;
+  if(cap){
+    db = cap;
+  } else if(window.firebase){
+    try {
+      firebase.initializeApp(FIREBASE_CONFIG);
+      db = firebase.firestore();
+    } catch(e){ dbState = "offline"; render(); return; }
+  } else {
+    dbState = "offline"; render(); return;
+  }
   dbState = "ready";
   const bind = (name) => db.collection(name).onSnapshot(
     snap => {
@@ -859,7 +883,7 @@ async function initDb(){
       if(name==="logs") pruneTrash();
       if(dbState==="ready") render();
     },
-    err => { if(err.code==="revoked"||err.code==="unavailable"){ dbState="offline"; render(); } }
+    err => { if(err.code==="revoked"||err.code==="unavailable"||err.code==="permission-denied"){ dbState="offline"; render(); } }
   );
   bind("hospitals");
   bind("logs");
