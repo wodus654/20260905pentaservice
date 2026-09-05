@@ -2391,6 +2391,7 @@ window.addEventListener("keydown", e=>{
 });
 
 /* ============ boot ============ */
+location.hash = "/dash";
 render();
 initDb();
 setInterval(()=>{ pruneDonePrep(); pruneTrash(); if(parseHash().path==="dash") render(); }, 60000);
