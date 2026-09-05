@@ -252,8 +252,8 @@ a{color:var(--accent)}
 .pmf .pmrange select{flex:1}
 .pmtilde{color:var(--ink-3);font-weight:600}
 .pmsuffix{flex:0 0 auto;font-size:12px;font-weight:600;color:var(--ink-2)}
-.pmf-check{cursor:pointer;justify-content:flex-start;gap:9px}
-.pmf-check span{flex:0 0 auto;order:2}
+.pmf-check{cursor:pointer;justify-content:flex-start;gap:9px;min-width:0}
+.pmf-check span{flex:1 1 auto;order:2;min-width:0;overflow-wrap:break-word}
 .pmf-check input{flex:0 0 auto;order:1;width:20px;height:20px;margin:0;accent-color:var(--accent)}
 @media(max-width:520px){.pmctl{flex-wrap:wrap}.pmctl .seg{flex-basis:100%;max-width:none}}
 
@@ -276,6 +276,7 @@ a{color:var(--accent)}
 .acrsec .pmf span{flex:0 0 150px}
 .acrsec .pmf input[readonly]{background:var(--surface-2);color:var(--ink-2);font-weight:600}
 .pmfields.acrcompact{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}
+.pmfields.acrcompact>*{min-width:0}
 .pmfields.acrcompact .pmf{flex-direction:column;align-items:stretch;gap:2px}
 .pmfields.acrcompact .pmf span{flex:none;font-size:10.5px;color:var(--ink-3)}
 .pmfields.acrcompact .pmf input{flex:none;padding:6px 8px}
@@ -292,8 +293,9 @@ a{color:var(--accent)}
 .acrsec .pmf.acrspacertop{margin-top:14px}
 .acrsec .pmf-check input{width:19px;height:19px;flex:0 0 auto;margin:0;accent-color:var(--accent)}
 .acrsec .pmf.acrpair{flex-direction:column;align-items:stretch;gap:3px}
-.acrchk{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-2);cursor:pointer}
+.acrchk{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-2);cursor:pointer;min-width:0;max-width:100%}
 .acrchk input{width:16px;height:16px;flex:0 0 auto;margin:0;accent-color:var(--accent)}
+.acrchk span{min-width:0;overflow-wrap:break-word}
 .acrsec .seg{margin-top:8px;max-width:280px}
 .acrsec .seg button{padding:6px 4px;font-size:12px}
 .acrtablewrap{overflow-x:auto;margin-top:6px;border:1px solid var(--border);border-radius:8px}
@@ -1420,8 +1422,12 @@ function openLightbox(src){
   d.className = "lightbox";
   const img = document.createElement("img"); img.src = src; img.alt = "현장 사진";
   d.appendChild(img);
-  d.addEventListener("click", ()=>d.remove());
+  function onPop(){ d.remove(); window.removeEventListener("popstate", onPop); }
+  function closeByTap(){ window.removeEventListener("popstate", onPop); d.remove(); history.back(); }
+  d.addEventListener("click", closeByTap);
   document.body.appendChild(d);
+  history.pushState({lightbox:true}, "");
+  window.addEventListener("popstate", onPop);
 }
 // 네이티브 confirm()은 Artifact 샌드박스에서 동작하지 않아 자체 확인창 사용
 function confirmDialog(msg, onYes, opts){
