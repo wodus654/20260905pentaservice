@@ -330,9 +330,9 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
 .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
 .calweekdays{margin-bottom:4px}
 .calwd{text-align:center;font-size:11px;color:var(--ink-3);font-weight:600;padding:2px 0}
-.calcell{min-height:52px;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:2px;
-  border:1px solid transparent;border-radius:8px;background:var(--surface-2);cursor:pointer;padding:3px 3px 4px;color:inherit;text-align:left}
-.calcell.empty{background:transparent;border:0;cursor:default;min-height:0}
+.calcell{height:68px;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:2px;
+  border:1px solid transparent;border-radius:8px;background:var(--surface-2);cursor:pointer;padding:3px 3px 4px;color:inherit;text-align:left;overflow:hidden}
+.calcell.empty{background:transparent;border:0;cursor:default}
 .calcell:hover:not(.empty){border-color:var(--accent)}
 .calcell.today{background:var(--accent-soft);border-color:var(--accent-line)}
 .calcell.today .calnum{color:var(--accent);font-weight:700}
@@ -1141,7 +1141,7 @@ function calendarHtml(){
   const pad2 = n => String(n).padStart(2,"0");
   let cells = "";
   for(let i=0;i<startWeekday;i++) cells += `<div class="calcell empty"></div>`;
-  const MAXTAGS = 3;
+  const MAXTAGS = 2;
   for(let d=1; d<=daysInMonth; d++){
     const ds = `${y}-${pad2(m)}-${pad2(d)}`;
     const sched = scheduleForDate(ds);
