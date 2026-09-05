@@ -327,6 +327,8 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
 /* 달력 */
 .calhead{display:flex;align-items:center;gap:8px;margin-bottom:12px}
 .calhead b{font-size:14px;letter-spacing:-.01em}
+.calmonthpick{position:relative;display:inline-flex;cursor:pointer}
+.calmonthpick input{position:absolute;inset:0;opacity:0;width:100%;height:100%;border:0;cursor:pointer}
 .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
 .calweekdays{margin-bottom:4px}
 .calwd{text-align:center;font-size:11px;color:var(--ink-3);font-weight:600;padding:2px 0}
@@ -339,13 +341,13 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
 .calnum{font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--ink-2);padding-left:1px}
 .caltags{display:flex;flex-direction:column;gap:1px;min-width:0}
 .caltag{font-size:9px;line-height:1.3;padding:1px 3px;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.caltag.cal-pm{background:var(--pm-soft);color:var(--pm)}
+.caltag.cal-pm{background:var(--warn-soft);color:var(--warn)}
 .caltag.cal-acr{background:var(--acr-soft);color:var(--acr)}
 .caltag.cal-sched{background:var(--accent-soft);color:var(--accent)}
 .caltag.cal-log{background:var(--ok-soft);color:var(--ok)}
 .calmore{font-size:9px;color:var(--ink-3);padding-left:3px}
 .caldot{width:5px;height:5px;border-radius:999px;display:inline-block;background:var(--ink-3)}
-.caldot.cal-pm{background:var(--pm)}
+.caldot.cal-pm{background:var(--warn)}
 .caldot.cal-acr{background:var(--acr)}
 .caldot.cal-sched{background:var(--accent)}
 .caldot.cal-log{background:var(--ok)}
@@ -959,6 +961,12 @@ async function addSchedule(hospitalId, date, type, note){
 }
 async function delSchedule(id){ await deleteDoc("schedule", id); }
 // 표시된 달의 병원별 다가오는 PM·ACR 예정을 날짜별로 묶는다
+function calShift(delta){
+  if(delta==="today"){ calMonth = new Date().toISOString().slice(0,7); }
+  else { const [y,m] = calMonth.split("-").map(Number); const d = new Date(y, m-1+delta, 1);
+    calMonth = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
+  render();
+}
 function calendarDueMap(){
   const map = {};
   store.hospitals.forEach(h=>{
@@ -1156,7 +1164,7 @@ function calendarHtml(){
     const done = [...(logsMap[ds]||[])];
     const items = [
       ...done.map(name=>({name, cls:"cal-log"})),
-      ...due.map(x=>({name:x.hname+" (예정)", cls: x.kind==="PM"?"cal-pm":"cal-acr"})),
+      ...due.map(x=>({name:(x.kind==="PM"?"PM·":"ACR·")+x.hname, cls: x.kind==="PM"?"cal-pm":"cal-acr"})),
       ...sched.map(s=>({name:(s.hospitalName||"—")+" (예정)", cls:"cal-sched"})),
     ];
     const shown = items.slice(0,MAXTAGS);
@@ -1168,10 +1176,10 @@ function calendarHtml(){
   }
   const trail = (7 - ((startWeekday + daysInMonth) % 7)) % 7;
   for(let i=0;i<trail;i++) cells += `<div class="calcell empty"></div>`;
-  return `<div class="card" style="padding:14px">
+  return `<div class="card" style="padding:14px" id="cal-swipe">
     <div class="calhead">
       <button type="button" class="btn ghost sm" data-action="cal-prev" aria-label="이전 달">‹</button>
-      <b>${y}년 ${m}월</b>
+      <label class="calmonthpick"><b>${y}년 ${m}월</b><input type="month" data-cal-jump value="${calMonth}" aria-label="연월 선택"></label>
       <button type="button" class="btn ghost sm" data-action="cal-next" aria-label="다음 달">›</button>
       <button type="button" class="btn ghost sm" data-action="cal-today" style="margin-left:auto">오늘</button>
     </div>
@@ -1240,6 +1248,18 @@ function viewDash(){
          <button class="btn primary" style="margin-top:12px" data-action="new-log">첫 일지 작성</button></div>` }
     ${prepSection}
   </div>`;
+  bindCalSwipe();
+}
+function bindCalSwipe(){
+  const el = $("#cal-swipe"); if(!el) return;
+  let sx=null, sy=null;
+  el.addEventListener("touchstart", e=>{ sx=e.touches[0].clientX; sy=e.touches[0].clientY; }, {passive:true});
+  el.addEventListener("touchend", e=>{
+    if(sx==null) return;
+    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+    if(Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)*1.5) calShift(dx<0 ? 1 : -1);
+    sx=null; sy=null;
+  }, {passive:true});
 }
 
 function typeLabel(l){
@@ -2182,9 +2202,14 @@ function getUserLabel(){ return "이 기기 설정으로 저장됩니다"; }
 function openDay(dateStr){
   const sched = scheduleForDate(dateStr);
   const due = calendarDueMap()[dateStr] || [];
+  const dayLogs = store.logs.filter(l=>!l.deleted && l.date===dateStr).sort(byDateDesc);
   const hospOpts = store.hospitals.slice().sort(koSort)
     .map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join("");
   openPanel(`
+    <div class="card formcard">
+      <h3>작성된 일지 (${dayLogs.length})</h3>
+      ${dayLogs.length ? `<div class="rows">${dayLogs.map(logRow).join("")}</div>` : `<div class="empty" style="padding:10px 0">이 날짜에 작성된 일지가 없습니다.</div>`}
+    </div>
     ${due.length ? `<div class="card formcard">
       <h3>자동 계산된 예정 (PM·ACR)</h3>
       ${due.map(x=>`<div class="mini"><span class="mtext"><span class="chip ${x.cls}">${esc(x.label)}</span> ${esc(x.hname)}</span>
@@ -2343,13 +2368,14 @@ document.addEventListener("click", e=>{
     if(p) toast("‘"+p.text+"’ 삭제됨", {label:"실행취소", fn:()=> saveDoc("prep", p)});
     return; }
   if(act==="cal-prev"||act==="cal-next"||act==="cal-today"){
-    const [y,m] = calMonth.split("-").map(Number);
-    if(act==="cal-today") calMonth = new Date().toISOString().slice(0,7);
-    else { const d = new Date(y, m-1+(act==="cal-next"?1:-1), 1); calMonth = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
-    render();
+    if(act==="cal-today") calShift("today"); else calShift(act==="cal-next"?1:-1);
     return; }
   if(act==="open-day") return openDay(a.dataset.date);
   if(act==="del-schedule"){ delSchedule(id); openDay(a.dataset.date); return; }
+});
+document.addEventListener("change", e=>{
+  const mj = e.target.closest("[data-cal-jump]");
+  if(mj && mj.value){ calMonth = mj.value; render(); }
 });
 document.addEventListener("submit", e=>{
   const pf = e.target.closest("[data-prep-add]");
