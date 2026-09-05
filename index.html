@@ -180,6 +180,7 @@ a{color:var(--accent)}
 .stat .v{font-size:26px;font-weight:600;letter-spacing:-.02em;margin-top:3px}
 .stat .v small{font-size:13px;color:var(--ink-3);font-weight:500}
 .stat.alert .v{color:var(--crit)}
+.stat[data-go]:hover,.stat[data-scroll]:hover{border-color:var(--accent-line);background:var(--surface-2)}
 
 /* list rows */
 .section-t{display:flex;align-items:center;justify-content:space-between;margin:22px 2px 9px}
@@ -329,14 +330,19 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
 .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
 .calweekdays{margin-bottom:4px}
 .calwd{text-align:center;font-size:11px;color:var(--ink-3);font-weight:600;padding:2px 0}
-.calcell{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
-  border:1px solid transparent;border-radius:8px;background:var(--surface-2);cursor:pointer;padding:2px;color:inherit}
-.calcell.empty{background:transparent;border:0;cursor:default}
+.calcell{min-height:52px;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:2px;
+  border:1px solid transparent;border-radius:8px;background:var(--surface-2);cursor:pointer;padding:3px 3px 4px;color:inherit;text-align:left}
+.calcell.empty{background:transparent;border:0;cursor:default;min-height:0}
 .calcell:hover:not(.empty){border-color:var(--accent)}
 .calcell.today{background:var(--accent-soft);border-color:var(--accent-line)}
 .calcell.today .calnum{color:var(--accent);font-weight:700}
-.calnum{font-size:12.5px;font-variant-numeric:tabular-nums}
-.caldots{display:flex;gap:2px;height:6px}
+.calnum{font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--ink-2);padding-left:1px}
+.caltags{display:flex;flex-direction:column;gap:1px;min-width:0}
+.caltag{font-size:9px;line-height:1.3;padding:1px 3px;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.caltag.cal-pm{background:var(--pm-soft);color:var(--pm)}
+.caltag.cal-acr{background:var(--acr-soft);color:var(--acr)}
+.caltag.cal-sched{background:var(--accent-soft);color:var(--accent)}
+.calmore{font-size:9px;color:var(--ink-3);padding-left:3px}
 .caldot{width:5px;height:5px;border-radius:999px;display:inline-block;background:var(--ink-3)}
 .caldot.cal-pm{background:var(--pm)}
 .caldot.cal-acr{background:var(--acr)}
@@ -1135,16 +1141,21 @@ function calendarHtml(){
   const pad2 = n => String(n).padStart(2,"0");
   let cells = "";
   for(let i=0;i<startWeekday;i++) cells += `<div class="calcell empty"></div>`;
+  const MAXTAGS = 3;
   for(let d=1; d<=daysInMonth; d++){
     const ds = `${y}-${pad2(m)}-${pad2(d)}`;
-    const schedN = scheduleForDate(ds).length;
+    const sched = scheduleForDate(ds);
     const due = dueMap[ds]||[];
-    const dots = [];
-    if(due.some(x=>x.kind==="PM")) dots.push(`<span class="caldot cal-pm"></span>`);
-    if(due.some(x=>x.kind!=="PM")) dots.push(`<span class="caldot cal-acr"></span>`);
-    if(schedN) dots.push(`<span class="caldot cal-sched"></span>`);
+    const items = [
+      ...due.map(x=>({name:x.hname, cls: x.kind==="PM"?"cal-pm":"cal-acr"})),
+      ...sched.map(s=>({name:s.hospitalName||"—", cls:"cal-sched"})),
+    ];
+    const shown = items.slice(0,MAXTAGS);
+    const extra = items.length - shown.length;
+    const tags = shown.map(it=>`<span class="caltag ${it.cls}">${esc(it.name)}</span>`).join("")
+      + (extra>0 ? `<span class="calmore">+${extra}건 더</span>` : "");
     cells += `<button type="button" class="calcell${ds===today?" today":""}" data-action="open-day" data-date="${ds}">
-      <span class="calnum">${d}</span><span class="caldots">${dots.join("")}</span></button>`;
+      <span class="calnum">${d}</span><div class="caltags">${tags}</div></button>`;
   }
   const trail = (7 - ((startWeekday + daysInMonth) % 7)) % 7;
   for(let i=0;i<trail;i++) cells += `<div class="calcell empty"></div>`;
@@ -1174,10 +1185,10 @@ function viewDash(){
   const prepHosps = store.hospitals.filter(h=>prepForHospital(h.id, true).length>0)
     .sort(koSort);
 
-  const tile = (k,v,sub,alert)=>`<div class="card stat ${alert?"alert":""}"><div class="k">${k}</div><div class="v tnum">${v}${sub?` <small>${sub}</small>`:""}</div></div>`;
+  const tile = (k,v,sub,alert,go,scrollId)=>`<div class="card stat ${alert?"alert":""}" ${go?`data-go="${go}"`:scrollId?`data-scroll="${scrollId}"`:""} ${go||scrollId?'style="cursor:pointer"':""}><div class="k">${k}</div><div class="v tnum">${v}${sub?` <small>${sub}</small>`:""}</div></div>`;
 
   const prepSection = `
-    <div class="section-t"><h2>챙길 것 · 다음 방문 준비물</h2><span class="rmeta" style="font-size:11.5px">체크 후 1시간 뒤 자동 삭제</span></div>
+    <div class="section-t" id="prep-section"><h2>챙길 것 · 다음 방문 준비물</h2><span class="rmeta" style="font-size:11.5px">체크 후 1시간 뒤 자동 삭제</span></div>
     ${ prepHosps.length ? `<div class="rows">${prepHosps.map(h=>{
         const items = prepForHospital(h.id, true);
         const openN = items.filter(p=>!p.done).length;
@@ -1194,16 +1205,16 @@ function viewDash(){
   $("#view").innerHTML = head("대시보드", `${store.hospitals.length}개 병원 관리 중`) + `<div class="wrap">
     ${connBanner()}${sampleBanner()}
     <div class="stats">
-      ${tile("관리 병원", store.hospitals.length, "곳")}
-      ${tile("기한 지남", overdue.length, "건", overdue.length>0)}
-      ${tile("미완료 작업", openCnt, "건", openCnt>0)}
-      ${tile("챙길 것", prepOpen.length, "건", prepOpen.length>0)}
+      ${tile("관리 병원", store.hospitals.length, "곳", false, "hospitals")}
+      ${tile("기한 지남", overdue.length, "건", overdue.length>0, null, "due-section")}
+      ${tile("미완료 작업", openCnt, "건", openCnt>0, "logs?status=open")}
+      ${tile("챙길 것", prepOpen.length, "건", prepOpen.length>0, null, "prep-section")}
     </div>
 
     <div class="section-t"><h2>일정 달력</h2></div>
     ${calendarHtml()}
 
-    <div class="section-t"><h2>다가오는 일정 · ${WINDOW}일 이내 (PM · ACR)</h2><button class="btn ghost sm" data-nav="hospitals">전체 병원</button></div>
+    <div class="section-t" id="due-section"><h2>다가오는 일정 · ${WINDOW}일 이내 (PM · ACR)</h2><button class="btn ghost sm" data-nav="hospitals">전체 병원</button></div>
     ${ due.length ? `<div class="rows">${due.map(x=>{
         const od = x.days<0;
         const lv = lastVisitDate(x.hid);
@@ -1341,7 +1352,8 @@ function viewLogs(){
   let list = store.logs.filter(l=>!l.deleted).sort(byDateDesc);
   if(q.hid) list = list.filter(l=>l.hospitalId===q.hid);
   if(q.type) list = list.filter(l=>l.type===q.type);
-  if(q.status) list = list.filter(l=>l.status===q.status);
+  if(q.status==="open") list = list.filter(l=>l.status && l.status!=="done");
+  else if(q.status) list = list.filter(l=>l.status===q.status);
   const term = (q.s||"").toLowerCase();
   if(term) list = list.filter(l => (`${l.title} ${l.description} ${l.parts} ${l.symptom} ${hospById(l.hospitalId)?.name||l.hospitalName||""} ${l.systemModel}`).toLowerCase().includes(term));
 
@@ -2279,6 +2291,8 @@ document.addEventListener("click", e=>{
   if(nav){ go(nav.dataset.nav); return; }
   const goEl = e.target.closest("[data-go]");
   if(goEl){ go(goEl.dataset.go); return; }
+  const scrollEl = e.target.closest("[data-scroll]");
+  if(scrollEl){ document.getElementById(scrollEl.dataset.scroll)?.scrollIntoView({behavior:"auto", block:"start"}); return; }
   const a = e.target.closest("[data-action]");
   if(!a) return;
   const act = a.dataset.action;
@@ -2353,7 +2367,8 @@ function currentLogList(){
   let list = store.logs.filter(l=>!l.deleted);
   if(q.hid) list = list.filter(l=>l.hospitalId===q.hid);
   if(q.type) list = list.filter(l=>l.type===q.type);
-  if(q.status) list = list.filter(l=>l.status===q.status);
+  if(q.status==="open") list = list.filter(l=>l.status && l.status!=="done");
+  else if(q.status) list = list.filter(l=>l.status===q.status);
   const term=(q.s||"").toLowerCase();
   if(term) list = list.filter(l => (`${l.title} ${l.description} ${l.parts} ${l.symptom}`).toLowerCase().includes(term));
   return list;
