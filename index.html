@@ -1405,7 +1405,13 @@ function viewLogs(){
 
 /* ============ panels (forms + detail) ============ */
 const panelRoot = () => $("#panel-root");
-function closePanel(){ panelRoot().innerHTML=""; document.body.style.overflow=""; render(); }
+// 패널이 열려있는 동안 히스토리 항목을 하나 push 해서, 폰 뒤로가기가 (엉뚱한 탭으로
+// 튀지 않고) 패널만 닫도록 한다 — 라이트박스와 동일한 패턴.
+let panelPopHandler = null;
+function closePanel(){
+  if(panelPopHandler){ window.removeEventListener("popstate", panelPopHandler); panelPopHandler=null; history.back(); }
+  panelRoot().innerHTML=""; document.body.style.overflow=""; render();
+}
 function openPanel(html){
   panelRoot().innerHTML = `<div class="panel"><div class="phead">
     <button class="btn ghost sm" data-action="close-panel" aria-label="닫기">
@@ -1415,6 +1421,11 @@ function openPanel(html){
   </div><div class="pbody" id="pbody"></div></div>`;
   $("#pbody").innerHTML = html;
   document.body.style.overflow="hidden";
+  if(!panelPopHandler){
+    panelPopHandler = ()=>{ panelPopHandler=null; closePanelSoft(); render(); };
+    history.pushState({panel:true}, "");
+    window.addEventListener("popstate", panelPopHandler);
+  }
 }
 function setPanelTitle(t){ const e=$("#panel-title"); if(e) e.textContent=t; }
 function openLightbox(src){
