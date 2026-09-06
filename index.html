@@ -833,10 +833,14 @@ const local = {
 let engineer = local.get("engineer","");
 
 /* ============ login gate ============ */
-const ACCOUNTS = { root:{pw:"operator", role:"admin"}, sdc:{pw:"adw2.0", role:"viewer"} };
+const ACCOUNTS = { root:{pw:"operator", role:"admin"}, sdc:{pw:"adw2.0", role:"logger"} };
 let session = local.get("autoUser", null);
 if(session && !ACCOUNTS[session]) session = null;
-function canEdit(){ const acc = ACCOUNTS[session]; return !!acc && acc.role !== "viewer"; }
+function role(){ const acc = ACCOUNTS[session]; return acc ? acc.role : null; }
+function canEdit(){ return role() === "admin"; }          // 병원/기존 일지 수정·삭제 등 전체 편집
+function canLog(){ const r = role(); return r === "admin" || r === "logger"; } // 새 일지 작성 가능
+// logger 계정이 예외적으로 허용되는 클릭 액션 (새 일지 작성 흐름만)
+const LOGGER_OK_ACTIONS = new Set(["new-log"]);
 const MUTATING_ACTIONS = new Set(["new-log","edit-log","delete-log","new-hospital","edit-hospital","delete-hospital",
   "clear-samples","restore-log","purge-log","empty-trash","prep-done","prep-del","del-schedule"]);
 function renderLogin(){
@@ -1031,7 +1035,10 @@ function calendarDueMap(){
   return map;
 }
 async function saveDoc(coll, obj){
-  if(!canEdit()){ toast("보기 전용 계정입니다 — 데이터를 수정할 수 없습니다"); return obj; }
+  const isNew = !obj.id;
+  // logger(sdc): 새 일지 작성 흐름(logs·photos·prep 신규 생성)만 허용, 기존 문서 수정은 불가
+  const loggerCreate = isNew && canLog() && (coll==="logs" || coll==="photos" || coll==="prep");
+  if(!canEdit() && !loggerCreate){ toast("이 계정은 데이터를 수정할 수 없습니다"); return obj; }
   const now = new Date().toISOString();
   if(!obj.id){ obj = Object.assign({}, obj, {id:uid(), createdAt:now}); }
   obj.updatedAt = now;
@@ -1706,10 +1713,10 @@ function openLogDetail(id){
       ${(()=>{ const ps = photosForLog(l.id); return ps.length ? `<div class="kv"><span class="kk">사진 (${ps.length})</span>
         <div class="thumbs" style="margin-top:6px">${ps.map(p=>`<div class="thumb"><img src="${p.dataUri}" data-lightbox="${p.id}" alt="현장 사진"></div>`).join("")}</div></div>` : ""; })()}
     </div>
-    <div style="display:flex;gap:8px">
+    ${canEdit() ? `<div style="display:flex;gap:8px">
       <button class="btn primary" style="flex:1" data-action="edit-log" data-id="${l.id}">수정</button>
       <button class="btn danger" data-action="delete-log" data-id="${l.id}">삭제</button>
-    </div>
+    </div>` : `<div class="hint" style="text-align:center">이 계정은 일지 작성만 가능하며, 기존 일지는 수정·삭제할 수 없습니다.</div>`}
   `);
   setPanelTitle("작업일지 상세");
 }
@@ -1809,6 +1816,8 @@ function renderAcrFullDetail(af, systemModel){
 
 /* ---- log form ---- */
 function openLogForm(id, presetHid){
+  if(id && !canEdit()){ toast("이 계정은 기존 일지를 수정할 수 없습니다"); return; }
+  if(!id && !canLog()){ toast("보기 전용 계정입니다"); return; }
   const editing = id ? store.logs.find(x=>x.id===id) : null;
   const l = editing ? Object.assign({}, editing) : {
     type:"PM", date: todayStr(), status:"done",
@@ -2407,7 +2416,7 @@ function openSettings(){
     <div class="field"><label>로그인 계정</label>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-weight:600">${esc(session||"")}</span>
-        <span class="chip ${canEdit()?"":"muted"}">${canEdit()?"편집 가능":"보기 전용"}</span>
+        <span class="chip ${canEdit()?"":"muted"}">${canEdit()?"편집 가능":canLog()?"일지 작성만 가능":"보기 전용"}</span>
         <button type="button" class="btn sm" data-action="logout" style="margin-left:auto">로그아웃</button>
       </div>
     </div>
@@ -2598,7 +2607,10 @@ document.addEventListener("click", e=>{
   if(!a) return;
   const act = a.dataset.action;
   const id = a.dataset.id;
-  if(MUTATING_ACTIONS.has(act) && !canEdit()){ toast("보기 전용 계정입니다 — 데이터를 수정할 수 없습니다"); return; }
+  if(MUTATING_ACTIONS.has(act) && !canEdit() && !(canLog() && LOGGER_OK_ACTIONS.has(act))){
+    toast(canLog() ? "이 계정은 기존 일지를 수정·삭제할 수 없습니다" : "보기 전용 계정입니다 — 데이터를 수정할 수 없습니다");
+    return;
+  }
   if(act==="call-tel"){ e.preventDefault(); window.open("tel:"+a.dataset.tel, "_blank"); return; }
   if(act==="close-panel") return closePanel();
   if(act==="settings") return openSettings();
