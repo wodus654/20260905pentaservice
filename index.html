@@ -1380,7 +1380,7 @@ function viewHospital(){
     <div class="card formcard">
       ${ sys.length ? sys.map(s=>`<div class="mini">
         <div class="mtext"><b>${esc(s.model||"모델 미상")}</b>
-        <div class="rmeta"><span>${esc(s.vendor||"")}</span>${s.tesla?`<span class="mono">${esc(s.tesla)}T</span>`:""}${s.swVersion?`<span class="mono">SW ${esc(s.swVersion)}</span>`:""}${s.serial?`<span class="mono">S/N ${esc(s.serial)}</span>`:""}${s.installDate?`<span>설치 ${fmtDate(s.installDate)}</span>`:""}</div></div>
+        <div class="rmeta"><span>${esc(s.vendor||"")}</span>${s.tesla?`<span class="mono">${esc(s.tesla)}T</span>`:""}${s.swVersion?`<span class="mono">(${esc(s.swVersion)})</span>`:""}${s.serial?`<span class="mono">S/N ${esc(s.serial)}</span>`:""}${s.installDate?`<span>설치 ${fmtDate(s.installDate)}</span>`:""}</div></div>
       </div>`).join("") : `<div class="empty" style="padding:14px">등록된 장비가 없습니다. 병원 정보 수정에서 추가하세요.</div>` }
     </div>
 
