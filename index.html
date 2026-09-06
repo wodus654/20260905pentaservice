@@ -160,7 +160,13 @@ a{color:var(--accent)}
   background:rgba(0,0,0,.62);color:#fff;font-size:13px;line-height:1;display:grid;place-items:center;cursor:pointer}
 .thumb .up{position:absolute;inset:0;display:grid;place-items:center;background:var(--surface-2);color:var(--ink-3);font-size:12px}
 .lightbox{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.92);display:grid;place-items:center;padding:20px;cursor:zoom-out;overflow:hidden;touch-action:none}
+.lbtrack{display:grid;place-items:center;width:100%;height:100%;will-change:transform}
 .lightbox img{max-width:100%;max-height:100%;border-radius:8px;transform-origin:center center;will-change:transform;-webkit-user-select:none;user-select:none;-webkit-user-drag:none}
+.lbcount{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:2;background:rgba(0,0,0,.55);color:#fff;font-size:13px;font-weight:600;padding:4px 12px;border-radius:999px;letter-spacing:.02em}
+.lbnav{position:fixed;top:50%;transform:translateY(-50%);z-index:2;width:44px;height:44px;border-radius:999px;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:24px;line-height:1;cursor:pointer;display:grid;place-items:center;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
+.lbnav:disabled{opacity:.25;cursor:default}
+.lbprev{left:10px}.lbnext{right:10px}
+@media (max-width:520px){.lbnav{width:38px;height:38px;font-size:20px;background:rgba(255,255,255,.1)}}
 .confirmov{position:fixed;inset:0;z-index:140;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:20px}
 .confirmbox{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;max-width:320px;width:100%;box-shadow:var(--shadow)}
 .confirmbox p{margin:0 0 16px;font-size:14px;line-height:1.5;color:var(--ink);white-space:pre-wrap}
@@ -209,6 +215,10 @@ a{color:var(--accent)}
 .kv{display:flex;flex-direction:column;gap:1px}
 .kv .kk{font-size:12px;color:var(--ink-3);font-weight:600;text-transform:uppercase;letter-spacing:.02em}
 .kv .vv{font-size:15px}
+.kvdue{display:flex;align-items:center;gap:8px;margin-top:5px;flex-wrap:wrap}
+.kvdue input[type=date]{padding:5px 8px;font-size:13px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);max-width:170px}
+.kvdue-hint{font-size:11px;color:var(--ink-3)}
+.kvdue .dueauto{font-size:12px;color:var(--accent);background:none;border:0;padding:2px;cursor:pointer;text-decoration:underline}
 .contactline{margin-top:3px}
 .contactline:first-child{margin-top:0}
 .linklike{background:none;border:0;padding:0;font:inherit;color:var(--accent);font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
@@ -337,6 +347,13 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
 .prepadd input{flex:1;min-width:0;padding:8px 11px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);color:var(--ink)}
 
 /* 달력 */
+.calcard{overflow:hidden}
+.calbody{will-change:transform,opacity}
+@keyframes calInNext{from{opacity:0;transform:translateX(34px)}to{opacity:1;transform:translateX(0)}}
+@keyframes calInPrev{from{opacity:0;transform:translateX(-34px)}to{opacity:1;transform:translateX(0)}}
+.calbody.cal-enter-next{animation:calInNext .2s ease-out}
+.calbody.cal-enter-prev{animation:calInPrev .2s ease-out}
+@media (prefers-reduced-motion:reduce){.calbody.cal-enter-next,.calbody.cal-enter-prev{animation:none}}
 .calhead{display:flex;align-items:center;gap:8px;margin-bottom:12px}
 .calhead b{font-size:14px;letter-spacing:-.01em}
 .calmonthpick{position:relative;display:inline-flex;cursor:pointer}
@@ -982,10 +999,17 @@ async function addSchedule(hospitalId, date, type, note){
 }
 async function delSchedule(id){ await deleteDoc("schedule", id); }
 // 표시된 달의 병원별 다가오는 PM·ACR 예정을 날짜별로 묶는다
+let calAnimDir = 0; // -1 이전달, 1 다음달 — 다음 렌더에서 슬라이드 인 방향
 function calShift(delta){
-  if(delta==="today"){ calMonth = new Date().toISOString().slice(0,7); }
-  else { const [y,m] = calMonth.split("-").map(Number); const d = new Date(y, m-1+delta, 1);
-    calMonth = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
+  if(delta==="today"){
+    const t = new Date().toISOString().slice(0,7);
+    calAnimDir = t < calMonth ? -1 : t > calMonth ? 1 : 0;
+    calMonth = t;
+  } else {
+    const [y,m] = calMonth.split("-").map(Number); const d = new Date(y, m-1+delta, 1);
+    calMonth = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+    calAnimDir = delta > 0 ? 1 : -1;
+  }
   render();
 }
 const DUE_OVERRIDE_KEY = { "PM":"pmOverride", "ACR정밀":"acrFullOverride", "ACR서류":"acrDocOverride" };
@@ -1205,15 +1229,19 @@ function calendarHtml(){
   }
   const trail = (7 - ((startWeekday + daysInMonth) % 7)) % 7;
   for(let i=0;i<trail;i++) cells += `<div class="calcell empty"></div>`;
-  return `<div class="card" style="padding:14px" id="cal-swipe">
+  const enterCls = calAnimDir>0 ? " cal-enter-next" : calAnimDir<0 ? " cal-enter-prev" : "";
+  calAnimDir = 0;
+  return `<div class="card calcard" style="padding:14px" id="cal-swipe">
     <div class="calhead">
       <button type="button" class="btn ghost sm" data-action="cal-prev" aria-label="이전 달">‹</button>
       <label class="calmonthpick"><b>${y}년 ${m}월</b><input type="month" data-cal-jump value="${calMonth}" aria-label="연월 선택"></label>
       <button type="button" class="btn ghost sm" data-action="cal-next" aria-label="다음 달">›</button>
       <button type="button" class="btn ghost sm" data-action="cal-today" style="margin-left:auto">오늘</button>
     </div>
-    <div class="calgrid calweekdays">${["일","월","화","수","목","금","토"].map(w=>`<div class="calwd">${w}</div>`).join("")}</div>
-    <div class="calgrid">${cells}</div>
+    <div class="calbody${enterCls}">
+      <div class="calgrid calweekdays">${["일","월","화","수","목","금","토"].map(w=>`<div class="calwd">${w}</div>`).join("")}</div>
+      <div class="calgrid">${cells}</div>
+    </div>
     <div class="calkey"><span><span class="caldot cal-log"></span> 작성된 일지</span><span><span class="caldot cal-pm"></span> PM 예정</span><span><span class="caldot cal-acr"></span> ACR 예정</span><span><span class="caldot cal-sched"></span> 등록한 일정</span></div>
   </div>`;
 }
@@ -1281,13 +1309,44 @@ function viewDash(){
 }
 function bindCalSwipe(){
   const el = $("#cal-swipe"); if(!el) return;
-  let sx=null, sy=null;
-  el.addEventListener("touchstart", e=>{ sx=e.touches[0].clientX; sy=e.touches[0].clientY; }, {passive:true});
+  const body = el.querySelector(".calbody"); if(!body) return;
+  const reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let sx=null, sy=null, dragging=false, w=320, done=false;
+  el.addEventListener("touchstart", e=>{
+    if(e.touches.length!==1) { sx=null; return; }
+    sx=e.touches[0].clientX; sy=e.touches[0].clientY; dragging=false; done=false;
+    w = el.clientWidth || 320;
+    body.style.transition = "none";
+  }, {passive:true});
+  el.addEventListener("touchmove", e=>{
+    if(sx==null || done) return;
+    const dx=e.touches[0].clientX-sx, dy=e.touches[0].clientY-sy;
+    if(!dragging){
+      if(Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)*1.3) dragging=true;
+      else if(Math.abs(dy) > 10){ sx=null; body.style.transform=""; body.style.opacity=""; return; }
+      else return;
+    }
+    if(reduce) return;
+    const t = dx*0.55;
+    body.style.transform = `translateX(${t}px)`;
+    body.style.opacity = String(Math.max(.35, 1 - Math.abs(t)/w));
+  }, {passive:true});
   el.addEventListener("touchend", e=>{
     if(sx==null) return;
-    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
-    if(Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)*1.5) calShift(dx<0 ? 1 : -1);
-    sx=null; sy=null;
+    const dx=e.changedTouches[0].clientX-sx, dy=e.changedTouches[0].clientY-sy;
+    sx=null; sy=null; done=true;
+    const commit = dragging && Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)*1.5;
+    if(reduce){ if(commit) calShift(dx<0?1:-1); body.style.transform=""; body.style.opacity=""; return; }
+    body.style.transition = "transform .15s ease-out, opacity .15s ease-out";
+    if(commit){
+      const dir = dx<0 ? 1 : -1;
+      body.style.transform = `translateX(${dir>0 ? -w*0.5 : w*0.5}px)`;
+      body.style.opacity = "0";
+      setTimeout(()=>calShift(dir), 135);
+    } else {
+      body.style.transform = "translateX(0)";
+      body.style.opacity = "1";
+    }
   }, {passive:true});
 }
 
@@ -1357,6 +1416,10 @@ function viewHospital(){
   const coldheads = logs.filter(l=>l.type==="COLDHEAD");
   const sys = h.systems||[];
   const dueChip = d => d.days==null ? "" : `<span class="chip ${d.days<0?"overdue":d.days<=14?"soon":"muted"}">${d.days<0?`${-d.days}일 지남`:`D-${d.days}`}</span>`;
+  const dueEdit = (ovKey, curDue) => !canEdit() ? "" : `<span class="kvdue">
+    <input type="date" value="${esc(curDue||"")}" data-due-edit data-hid="${h.id}" data-ovkey="${ovKey}" aria-label="예정일 수정">
+    ${h[ovKey] ? `<button type="button" class="dueauto" data-due-edit data-hid="${h.id}" data-ovkey="${ovKey}" data-clear="1">자동으로</button>` : `<span class="kvdue-hint">직접 지정</span>`}
+  </span>`;
   $("#view").innerHTML = head(h.name, h.region?esc(h.region):"") + `<div class="wrap">
     ${connBanner()}
     <div class="filters">
@@ -1368,10 +1431,10 @@ function viewHospital(){
       <div class="kvgrid">
         <div class="kv"><span class="kk">지역</span><span class="vv">${esc(h.region||"—")}</span></div>
         <div class="kv"><span class="kk">담당자</span><span class="vv">${contactsList(h).length ? contactsList(h).map(contactLine).join("") : "—"}</span></div>
-        <div class="kv"><span class="kk">다음 PM 예정 (주기 ${pm.interval}개월)</span><span class="vv tnum">${pm.due?fmtDate(pm.due):"미정 — PM 일지 필요"} ${dueChip(pm)}</span></div>
+        <div class="kv"><span class="kk">다음 PM 예정 (주기 ${pm.interval}개월)</span><span class="vv tnum">${pm.due?fmtDate(pm.due):"미정 — PM 일지 필요"} ${dueChip(pm)}</span>${dueEdit("pmOverride", pm.due)}</div>
         <div class="kv"><span class="kk">최근 PM</span><span class="vv tnum">${pm.last?fmtDate(pm.last):"—"}</span></div>
-        <div class="kv"><span class="kk">다음 ACR 정밀 (3년)</span><span class="vv tnum">${acr.full.due?fmtDate(acr.full.due):"미정"} ${dueChip(acr.full)}</span></div>
-        <div class="kv"><span class="kk">다음 ACR 서류 (매년)</span><span class="vv tnum">${acr.doc.covered?`<span style="color:var(--ink-3)">${acr.doc.due?new Date(acr.doc.due).getFullYear():""}년 정밀 시행 → 서류 생략</span>`:(acr.doc.due?fmtDate(acr.doc.due):"미정")} ${acr.doc.covered?"":dueChip(acr.doc)}</span></div>
+        <div class="kv"><span class="kk">다음 ACR 정밀 (3년)</span><span class="vv tnum">${acr.full.due?fmtDate(acr.full.due):"미정"} ${dueChip(acr.full)}</span>${dueEdit("acrFullOverride", acr.full.due)}</div>
+        <div class="kv"><span class="kk">다음 ACR 서류 (매년)</span><span class="vv tnum">${acr.doc.covered?`<span style="color:var(--ink-3)">${acr.doc.due?new Date(acr.doc.due).getFullYear():""}년 정밀 시행 → 서류 생략</span>`:(acr.doc.due?fmtDate(acr.doc.due):"미정")} ${acr.doc.covered?"":dueChip(acr.doc)}</span>${acr.doc.covered?"":dueEdit("acrDocOverride", acr.doc.due)}</div>
       </div>
       ${h.address?`<div class="kv"><span class="kk">주소</span><span class="vv">${esc(h.address)}</span></div>`:""}
       ${h.notes?`<div class="kv"><span class="kk">메모</span><span class="vv">${esc(h.notes)}</span></div>`:""}
@@ -1483,25 +1546,73 @@ function openPanel(html){
   }
 }
 function setPanelTitle(t){ const e=$("#panel-title"); if(e) e.textContent=t; }
-function openLightbox(src){
+function openLightbox(srcOrList, startIdx){
+  const list = Array.isArray(srcOrList) ? srcOrList.slice() : [srcOrList];
+  let idx = Math.max(0, Math.min(startIdx|0, list.length-1));
+  const multi = list.length > 1;
+
   const d = document.createElement("div");
   d.className = "lightbox";
-  const img = document.createElement("img"); img.src = src; img.alt = "현장 사진"; img.draggable = false;
-  d.appendChild(img);
+  const track = document.createElement("div"); track.className = "lbtrack";
+  const img = document.createElement("img"); img.alt = "현장 사진"; img.draggable = false;
+  track.appendChild(img); d.appendChild(track);
+  const counter = document.createElement("div"); counter.className = "lbcount";
+  let prevBtn, nextBtn;
+  if(multi){
+    d.appendChild(counter);
+    prevBtn = document.createElement("button"); prevBtn.type="button"; prevBtn.className="lbnav lbprev"; prevBtn.textContent="‹"; prevBtn.setAttribute("aria-label","이전 사진");
+    nextBtn = document.createElement("button"); nextBtn.type="button"; nextBtn.className="lbnav lbnext"; nextBtn.textContent="›"; nextBtn.setAttribute("aria-label","다음 사진");
+    d.appendChild(prevBtn); d.appendChild(nextBtn);
+  }
   document.body.appendChild(d);
-  pushOverlay(()=>d.remove());
+  pushOverlay(()=>{ d.remove(); document.removeEventListener("keydown", onKey); });
 
   // 자체 핀치 줌/패닝 — 브라우저 기본 줌은 fixed 오버레이에서 축소가 안 먹는 기기가 있어서 직접 처리한다.
   let scale=1, tx=0, ty=0, touchUsed=false, moved=false;
   let d0=0, s0=1, m0=null, t0x=0, t0y=0, pan=null;
+  let swx=null, swy=null, swActive=false, animating=false;
   const apply = ()=>{ img.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
   const clamp = ()=>{ scale = Math.min(Math.max(scale,1), 6); if(scale<=1.02){ scale=1; tx=0; ty=0; } };
   const dist = t => Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
   const mid  = t => ({x:(t[0].clientX+t[1].clientX)/2, y:(t[0].clientY+t[1].clientY)/2});
+  function load(){
+    img.src = list[idx];
+    scale=1; tx=0; ty=0; apply();
+    counter.textContent = (idx+1) + " / " + list.length;
+    if(prevBtn) prevBtn.disabled = idx===0;
+    if(nextBtn) nextBtn.disabled = idx===list.length-1;
+  }
+  function nav(dir){
+    if(animating) return;
+    const n = idx + dir;
+    if(n<0 || n>=list.length){ track.style.transition="transform .18s ease-out"; track.style.transform="translateX(0)"; return; }
+    animating = true;
+    const w = d.clientWidth || 320;
+    track.style.transition = "transform .16s ease-out";
+    track.style.transform = `translateX(${dir>0 ? -w : w}px)`;
+    setTimeout(()=>{
+      idx = n; load();
+      track.style.transition = "none";
+      track.style.transform = `translateX(${dir>0 ? w : -w}px)`;
+      void track.offsetWidth;
+      track.style.transition = "transform .16s ease-out";
+      track.style.transform = "translateX(0)";
+      setTimeout(()=>{ animating=false; }, 170);
+    }, 160);
+  }
+  function onKey(e){
+    if(e.key==="Escape") popOverlaySync();
+    else if(multi && e.key==="ArrowLeft") nav(-1);
+    else if(multi && e.key==="ArrowRight") nav(1);
+  }
+  document.addEventListener("keydown", onKey);
+  load();
+
   d.addEventListener("touchstart", e=>{
     touchUsed=true; moved=false;
-    if(e.touches.length===2){ d0=dist(e.touches); s0=scale; m0=mid(e.touches); t0x=tx; t0y=ty; }
-    else if(e.touches.length===1 && scale>1){ pan={x:e.touches[0].clientX-tx, y:e.touches[0].clientY-ty}; }
+    if(e.touches.length===2){ d0=dist(e.touches); s0=scale; m0=mid(e.touches); t0x=tx; t0y=ty; swActive=false; }
+    else if(e.touches.length===1 && scale>1){ pan={x:e.touches[0].clientX-tx, y:e.touches[0].clientY-ty}; swActive=false; }
+    else if(e.touches.length===1 && multi && !animating){ swx=e.touches[0].clientX; swy=e.touches[0].clientY; swActive=true; track.style.transition="none"; }
   }, {passive:true});
   d.addEventListener("touchmove", e=>{
     if(e.touches.length===2 && d0){
@@ -1510,15 +1621,35 @@ function openLightbox(src){
       clamp(); apply();
     } else if(e.touches.length===1 && pan && scale>1){
       moved=true; tx=e.touches[0].clientX-pan.x; ty=e.touches[0].clientY-pan.y; apply();
+    } else if(e.touches.length===1 && swActive){
+      const dx=e.touches[0].clientX-swx, dy=e.touches[0].clientY-swy;
+      if(Math.abs(dx) > Math.abs(dy)){
+        moved=true;
+        let t = dx;
+        if((idx===0 && dx>0) || (idx===list.length-1 && dx<0)) t = dx*0.3; // 끝에서는 저항
+        track.style.transform = `translateX(${t}px)`;
+      }
     }
   }, {passive:true});
   d.addEventListener("touchend", e=>{
     d0=0; pan=null;
     if(e.touches.length) return;
+    if(swActive){
+      swActive=false;
+      const dx = e.changedTouches[0].clientX - swx;
+      if(Math.abs(dx) > 50 && !animating){ nav(dx<0 ? 1 : -1); }
+      else { track.style.transition="transform .18s ease-out"; track.style.transform="translateX(0)"; }
+      return;
+    }
     clamp(); apply();
     if(!moved && scale===1) popOverlaySync();   // 확대 안 된 상태에서 그냥 탭 = 닫기
   });
-  d.addEventListener("click", ()=>{ if(!touchUsed) popOverlaySync(); }); // 데스크톱 클릭
+  d.addEventListener("click", e=>{
+    if(e.target===prevBtn){ nav(-1); return; }
+    if(e.target===nextBtn){ nav(1); return; }
+    if(!touchUsed && e.target===img && multi) return; // 데스크톱: 여러 장이면 이미지 클릭으로 닫지 않음
+    if(!touchUsed) popOverlaySync(); // 데스크톱 클릭(배경) = 닫기
+  });
 }
 // 네이티브 confirm()은 Artifact 샌드박스에서 동작하지 않아 자체 확인창 사용
 function confirmDialog(msg, onYes, opts){
@@ -2076,7 +2207,12 @@ function openLogForm(id, presetHid){
     const rmn = e.target.closest("[data-rmpending]");
     if(rmn){ pending.splice(+rmn.dataset.rmpending,1); renderThumbs(); return; }
     const full = e.target.closest("[data-full]");
-    if(full){ const p = store.photos.find(x=>x.id===full.dataset.full); if(p) openLightbox(p.dataUri); return; }
+    if(full){
+      const p = store.photos.find(x=>x.id===full.dataset.full);
+      if(p){ const ex = photosForLog(editing.id).filter(x=>!removedPhotoIds.includes(x.id));
+        openLightbox(ex.map(x=>x.dataUri), Math.max(0, ex.findIndex(x=>x.id===p.id))); }
+      return;
+    }
     const fullp = e.target.closest("[data-fullpending]");
     if(fullp){ const p = pending[+fullp.dataset.fullpending]; if(p) openLightbox(p.dataUri); return; }
   });
@@ -2443,13 +2579,17 @@ async function emptyTrash(){
 /* ============ event delegation ============ */
 document.addEventListener("click", e=>{
   const lb = e.target.closest("[data-lightbox]");
-  if(lb){ const p = store.photos.find(x=>x.id===lb.dataset.lightbox); if(p) openLightbox(p.dataUri); return; }
+  if(lb){
+    const p = store.photos.find(x=>x.id===lb.dataset.lightbox);
+    if(p){ const ps = photosForLog(p.logId); openLightbox(ps.map(x=>x.dataUri), Math.max(0, ps.findIndex(x=>x.id===p.id))); }
+    return;
+  }
   const afig = e.target.closest("[data-acrfig]");
   if(afig){ const src = ACR_FIGS[afig.dataset.acrfig]; if(src) openLightbox(src); return; }
   const dueClr = e.target.closest("button[data-due-edit][data-clear]");
   if(dueClr){ setDueOverride(dueClr.dataset.hid, dueClr.dataset.ovkey, "", dueClr.dataset.back); return; }
   const nav = e.target.closest("[data-nav]");
-  if(nav){ go(nav.dataset.nav); return; }
+  if(nav){ scrollTopNext = true; go(nav.dataset.nav); window.scrollTo(0, 0); return; }
   const goEl = e.target.closest("[data-go]");
   if(goEl){ go(goEl.dataset.go); return; }
   const scrollEl = e.target.closest("[data-scroll]");
@@ -2561,11 +2701,11 @@ function renderListKeepFocus(input){
   if(again){ again.focus(); try{ again.setSelectionRange(pos,pos); }catch(e){} }
 }
 
-window.addEventListener("hashchange", ()=>{ closePanelSoft(); render(); });
+let scrollTopNext = false;
+window.addEventListener("hashchange", ()=>{ closePanelSoft(); render(); if(scrollTopNext){ scrollTopNext = false; window.scrollTo(0, 0); } });
 window.addEventListener("keydown", e=>{
   if(e.key!=="Escape") return;
-  const lb = document.querySelector(".lightbox");
-  if(lb){ lb.remove(); return; }
+  if(document.querySelector(".lightbox")) return; // openLightbox가 Esc를 자체 처리
   if(panelRoot().innerHTML) closePanel();
 });
 
