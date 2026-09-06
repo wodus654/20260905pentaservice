@@ -289,6 +289,11 @@ a{color:var(--accent)}
 .pmfields.acrcompact .acrcheckrow{grid-column:1/-1;flex-direction:row;align-items:center}
 .pmfields.acrcompact .pmf-check span{font-size:12px;color:var(--ink-2)}
 .acrsec .pmf input.wlfill{background:#ffe066;color:#111;font-weight:700;border-color:#d9a900}
+.acrsec .pmf input.acrgood{background:#d5f0dd;color:#0f5132;font-weight:700;border-color:#3aa563}
+.acrsec .pmf input.acrbad{background:#f7d4d4;color:#842029;font-weight:700;border-color:#d05a5a}
+/* 섹션 자동판정이 불합격이면 그 섹션의 모든 입력칸 배경도 빨갛게 (개별 판정색이 붙은 칸은 그대로 둠) */
+.acrsec.acrfail .pmf input:not(.acrgood):not(.acrbad),
+.acrsec.acrfail .pmf select{background:var(--crit-soft);border-color:var(--crit)}
 .acrsec .pmf.acrspacer{margin-bottom:14px}
 .acrsec .pmf.acrspacertop{margin-top:14px}
 .acrsec .pmf-check input{width:19px;height:19px;flex:0 0 auto;margin:0;accent-color:var(--accent)}
@@ -758,6 +763,15 @@ function acrAutoEval(sk, d, piuThr, lcodThr){
     if(!ks.some(k=>d[k]==="Y")) return "";
     return ks.every(k=>d[k]==="Y") ? "pass" : "";
   }
+  return "";
+}
+// 자동 계산 필드 하나의 합격/불합격 — "" = 판정 불가(값 없음)
+function acrFieldVerdict(sk, key, d, piuThr){
+  const v = acrNum(d[key]); if(v==null) return "";
+  const E = 1e-9;
+  if(sk==="sta" && (key==="t1thk"||key==="t2thk")) return Math.abs(v-5.0)<=0.7+E ? "pass" : "fail";
+  if(sk==="piu" && (key==="t1piu"||key==="t2piu")) return v>=(piuThr||87.5)-E ? "pass" : "fail";
+  if(sk==="psg" && key==="ratio") return v<=2.5+E ? "pass" : "fail";
   return "";
 }
 function freshAcrFull(){
@@ -1513,7 +1527,7 @@ function openLogDetail(id){
       ${l.parts?kvBlock("교체 부품", l.parts):""}
       ${l.followUp?kvBlock("후속 조치", l.followUp):""}
       ${l.type==="PM" && l.pm && l.pm.length ? renderPmDetail(l.pm) : ""}
-      ${l.type==="ACR" && l.acrFull ? renderAcrFullDetail(l.acrFull) : ""}
+      ${l.type==="ACR" && l.acrFull ? renderAcrFullDetail(l.acrFull, l.systemModel) : ""}
       ${l.type==="ACR" && l.acr && l.acr.length ? `<div class="kv"><span class="kk">ACR QC 결과 (구버전)</span>
         <div style="margin-top:6px">${l.acr.map(a=>`<div class="mini"><span class="mtext">${esc(a.name)}</span>
         <span class="chip ${a.result==="pass"?"done":a.result==="fail"?"revisit":"muted"}">${a.result==="pass"?"적합":a.result==="fail"?"부적합":"해당없음"}</span></div>`).join("")}</div></div>` : ""}
@@ -1560,7 +1574,8 @@ function durationMin(a,b){ const [h1,m1]=a.split(":").map(Number),[h2,m2]=b.spli
 function acrEvLabel(v){ return (ACR_EVAL.find(o=>o.v===v)||{}).l || "미평가"; }
 function acrEvTone(v){ return pmToneClass((ACR_EVAL.find(o=>o.v===v)||{}).t || "muted"); }
 // 상세 화면용 — 작성 화면(renderAcrFull)과 동일한 레이아웃을 읽기전용으로 재현
-function renderAcrFullDetail(af){
+function renderAcrFullDetail(af, systemModel){
+  const dPiuThr = /3(\.0)?\s*t/i.test(systemModel||"") ? 82 : 87.5;
   const methodHtml = arr => arr && arr.length ? `<ol class="acrmethod">${arr.map(m=>`<li>${esc(m)}</li>`).join("")}</ol>` : "";
   const figsHtml = arr => { const fs=(arr||[]).filter(n=>ACR_FIGS[n]); return fs.length
     ? `<div class="acrfigs">${fs.map(n=>`<img src="${ACR_FIGS[n]}" data-acrfig="${n}" alt="검사방법 참고" loading="lazy">`).join("")}</div>` : ""; };
@@ -1599,13 +1614,15 @@ function renderAcrFullDetail(af){
           }
           const val = sec[k]||"";
           const hl = (k==="t1wl"||k==="t2wl"||k==="t1peakhalf"||k==="t2peakhalf"||k==="sighalf"||k==="geoww"||k==="geowl") && String(val).trim()!=="";
+          const vd = kind==="calc" ? acrFieldVerdict(s.k, k, sec, dPiuThr) : "";
+          const vcls = vd==="pass" ? " acrgood" : vd==="fail" ? " acrbad" : "";
           const sp = (k==="t1peak"||k==="t1peakhalf"||k==="t2peak"||k==="t2peakhalf") ? " acrspacer" : "";
           const spTop = (k==="t2peak"||k==="t2peakhalf") ? " acrspacertop" : "";
           const brk = (forceBreak || (s.k==="psg" && (k==="top"||k==="left"))) ? ' style="grid-column:1"' : ""; forceBreak = false;
           if(k==="sighalf" || k==="geowl") forceBreak = true;
           const nxt = F[i+1]; const pairChk = nxt && nxt[2]==="check" && nxt[3]==="pair";
           out += `<div class="pmf${pairChk?" acrpair":""}${sp}${spTop}"${brk}><span>${esc(label)}</span>
-            <input type="text" readonly tabindex="-1" value="${esc(val)}" class="${hl?"wlfill":""}" placeholder="${esc(flag||label)}">
+            <input type="text" readonly tabindex="-1" value="${esc(val)}" class="${hl?"wlfill":""}${vcls}" placeholder="${esc(flag||label)}">
             ${pairChk?chkLabel(sec, nxt):""}</div>`;
           if(pairChk) i++;
         }
@@ -1794,13 +1811,15 @@ function openLogForm(id, presetHid){
             }
             const val = acrFullState[s.k][k]||"";
             const hl = (k==="t1wl"||k==="t2wl"||k==="t1peakhalf"||k==="t2peakhalf"||k==="sighalf"||k==="geoww"||k==="geowl") && String(val).trim()!=="";
+            const vd = kind==="calc" ? acrFieldVerdict(s.k, k, acrFullState[s.k], acrPiuThr()) : "";
+            const vcls = vd==="pass" ? " acrgood" : vd==="fail" ? " acrbad" : "";
             const sp = (k==="t1peak"||k==="t1peakhalf"||k==="t2peak"||k==="t2peakhalf") ? " acrspacer" : "";
             const spTop = (k==="t2peak"||k==="t2peakhalf") ? " acrspacertop" : "";
             const brk = (forceBreak || (s.k==="psg" && (k==="top"||k==="left"))) ? ' style="grid-column:1"' : ""; forceBreak = false;
             if(k==="sighalf" || k==="geowl") forceBreak = true; // 다음 항목이 이 줄 남은 칸에 끼지 않도록 새 줄로
             const nxt = F[i+1]; const pairChk = nxt && nxt[2]==="check" && nxt[3]==="pair";
             out += `<div class="pmf${pairChk?" acrpair":""}${sp}${spTop}"${brk}><span>${esc(label)}</span>
-              <input type="text" inputmode="decimal" class="${hl?"wlfill":""}" data-acrf="${s.k}|${k}" value="${esc(val)}" ${kind==="calc"?"readonly":`placeholder="${esc(flag||label)}"`}>
+              <input type="text" inputmode="decimal" class="${hl?"wlfill":""}${vcls}" data-acrf="${s.k}|${k}" value="${esc(val)}" ${kind==="calc"?"readonly":`placeholder="${esc(flag||label)}"`}>
               ${pairChk?chkLabel(nxt):""}</div>`;
             if(pairChk) i++;
           }
@@ -1956,7 +1975,11 @@ function openLogForm(id, presetHid){
     const [sk,k] = af.dataset.acrf.split("|");
     acrFullState[sk][k] = af.type==="checkbox" ? (af.checked ? "Y" : "") : af.value;
     acrRecalcSection(sk).forEach(([k2,v])=>{ const el = form.querySelector('[data-acrf="'+sk+'|'+k2+'"]');
-      if(el && el!==af){ el.value = v; if(k2==="t1wl"||k2==="t2wl"||k2==="t1peakhalf"||k2==="t2peakhalf"||k2==="sighalf"||k2==="geoww"||k2==="geowl") el.classList.toggle("wlfill", String(v).trim()!==""); } });
+      if(el && el!==af){ el.value = v;
+        if(k2==="t1wl"||k2==="t2wl"||k2==="t1peakhalf"||k2==="t2peakhalf"||k2==="sighalf"||k2==="geoww"||k2==="geowl") el.classList.toggle("wlfill", String(v).trim()!=="");
+        const vd = acrFieldVerdict(sk, k2, acrFullState[sk], acrPiuThr());
+        el.classList.toggle("acrgood", vd==="pass"); el.classList.toggle("acrbad", vd==="fail");
+      } });
     acrAutoEvalAll(); acrRefreshEvalUI();
   }
   form.addEventListener("change", e=>{
