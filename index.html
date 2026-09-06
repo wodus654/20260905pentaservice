@@ -221,6 +221,11 @@ a{color:var(--accent)}
 .mini{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}
 .mini:last-child{border-bottom:0}
 .mini .mtext{flex:1;min-width:0}
+.mini.duemini{flex-wrap:wrap}
+.duerow2{flex-basis:100%;display:flex;align-items:center;gap:8px;padding-left:2px}
+.duerow2 label{font-size:12px;color:var(--ink-3);flex:0 0 auto}
+.duerow2 input[type=date]{flex:1;min-width:0;padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink)}
+.duerow2 .dueauto{flex:0 0 auto;font-size:12px;color:var(--accent);background:none;border:0;padding:4px 2px;cursor:pointer;text-decoration:underline}
 .acrgrid{display:grid;grid-template-columns:1fr;gap:8px}
 .acrrow{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
 .acrrow:last-child{border-bottom:0}
@@ -982,6 +987,14 @@ function calShift(delta){
   else { const [y,m] = calMonth.split("-").map(Number); const d = new Date(y, m-1+delta, 1);
     calMonth = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
   render();
+}
+const DUE_OVERRIDE_KEY = { "PM":"pmOverride", "ACR정밀":"acrFullOverride", "ACR서류":"acrDocOverride" };
+function setDueOverride(hid, ovKey, value, backDate){
+  if(!canEdit()){ toast("보기 전용 계정입니다 — 데이터를 수정할 수 없습니다"); return; }
+  const h = hospById(hid); if(!h || !ovKey) return;
+  saveDoc("hospitals", Object.assign({}, h, {[ovKey]: value || ""}));
+  toast(value ? "예정일을 " + fmtDate(value) + "(으)로 옮겼습니다" : "자동 계산으로 되돌렸습니다");
+  if(backDate) openDay(backDate);
 }
 function calendarDueMap(){
   const map = {};
@@ -2312,8 +2325,20 @@ function openDay(dateStr){
     </div>
     ${due.length ? `<div class="card formcard">
       <h3>자동 계산된 예정 (PM·ACR)</h3>
-      ${due.map(x=>`<div class="mini"><span class="mtext"><span class="chip ${x.cls}">${esc(x.label)}</span> ${esc(x.hname)}</span>
-        <button type="button" class="btn sm" data-go="hospital?id=${x.hid}">병원 보기</button></div>`).join("")}
+      ${due.map(x=>{
+        const ovKey = DUE_OVERRIDE_KEY[x.kind] || "";
+        const h = hospById(x.hid);
+        const hasOv = ovKey && h && h[ovKey];
+        return `<div class="mini duemini">
+        <span class="mtext"><span class="chip ${x.cls}">${esc(x.label)}</span> ${esc(x.hname)}</span>
+        <button type="button" class="btn sm" data-go="hospital?id=${x.hid}">병원 보기</button>
+        ${ovKey && canEdit() ? `<div class="duerow2">
+          <label>예정일</label>
+          <input type="date" value="${esc(x.due)}" data-due-edit data-hid="${x.hid}" data-ovkey="${ovKey}" data-back="${dateStr}">
+          ${hasOv ? `<button type="button" class="dueauto" data-due-edit data-hid="${x.hid}" data-ovkey="${ovKey}" data-back="${dateStr}" data-clear="1">자동으로</button>` : ""}
+        </div>` : ""}
+        </div>`;
+      }).join("")}
     </div>` : ""}
     <div class="card formcard">
       <h3>등록한 일정</h3>
@@ -2421,6 +2446,8 @@ document.addEventListener("click", e=>{
   if(lb){ const p = store.photos.find(x=>x.id===lb.dataset.lightbox); if(p) openLightbox(p.dataUri); return; }
   const afig = e.target.closest("[data-acrfig]");
   if(afig){ const src = ACR_FIGS[afig.dataset.acrfig]; if(src) openLightbox(src); return; }
+  const dueClr = e.target.closest("button[data-due-edit][data-clear]");
+  if(dueClr){ setDueOverride(dueClr.dataset.hid, dueClr.dataset.ovkey, "", dueClr.dataset.back); return; }
   const nav = e.target.closest("[data-nav]");
   if(nav){ go(nav.dataset.nav); return; }
   const goEl = e.target.closest("[data-go]");
@@ -2475,7 +2502,9 @@ document.addEventListener("click", e=>{
 });
 document.addEventListener("change", e=>{
   const mj = e.target.closest("[data-cal-jump]");
-  if(mj && mj.value){ calMonth = mj.value; render(); }
+  if(mj && mj.value){ calMonth = mj.value; render(); return; }
+  const de = e.target.closest("input[data-due-edit]");
+  if(de && de.value){ setDueOverride(de.dataset.hid, de.dataset.ovkey, de.value, de.dataset.back); return; }
 });
 document.addEventListener("submit", e=>{
   const pf = e.target.closest("[data-prep-add]");
