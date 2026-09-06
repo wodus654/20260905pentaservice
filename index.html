@@ -159,8 +159,8 @@ a{color:var(--accent)}
 .thumb button.x{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:999px;border:0;
   background:rgba(0,0,0,.62);color:#fff;font-size:13px;line-height:1;display:grid;place-items:center;cursor:pointer}
 .thumb .up{position:absolute;inset:0;display:grid;place-items:center;background:var(--surface-2);color:var(--ink-3);font-size:12px}
-.lightbox{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.9);display:grid;place-items:center;padding:20px;cursor:zoom-out}
-.lightbox img{max-width:100%;max-height:100%;border-radius:8px}
+.lightbox{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.92);display:grid;place-items:center;padding:20px;cursor:zoom-out;overflow:hidden;touch-action:none}
+.lightbox img{max-width:100%;max-height:100%;border-radius:8px;transform-origin:center center;will-change:transform;-webkit-user-select:none;user-select:none;-webkit-user-drag:none}
 .confirmov{position:fixed;inset:0;z-index:140;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:20px}
 .confirmbox{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;max-width:320px;width:100%;box-shadow:var(--shadow)}
 .confirmbox p{margin:0 0 16px;font-size:14px;line-height:1.5;color:var(--ink);white-space:pre-wrap}
@@ -1473,11 +1473,39 @@ function setPanelTitle(t){ const e=$("#panel-title"); if(e) e.textContent=t; }
 function openLightbox(src){
   const d = document.createElement("div");
   d.className = "lightbox";
-  const img = document.createElement("img"); img.src = src; img.alt = "현장 사진";
+  const img = document.createElement("img"); img.src = src; img.alt = "현장 사진"; img.draggable = false;
   d.appendChild(img);
-  d.addEventListener("click", popOverlaySync);
   document.body.appendChild(d);
   pushOverlay(()=>d.remove());
+
+  // 자체 핀치 줌/패닝 — 브라우저 기본 줌은 fixed 오버레이에서 축소가 안 먹는 기기가 있어서 직접 처리한다.
+  let scale=1, tx=0, ty=0, touchUsed=false, moved=false;
+  let d0=0, s0=1, m0=null, t0x=0, t0y=0, pan=null;
+  const apply = ()=>{ img.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
+  const clamp = ()=>{ scale = Math.min(Math.max(scale,1), 6); if(scale<=1.02){ scale=1; tx=0; ty=0; } };
+  const dist = t => Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
+  const mid  = t => ({x:(t[0].clientX+t[1].clientX)/2, y:(t[0].clientY+t[1].clientY)/2});
+  d.addEventListener("touchstart", e=>{
+    touchUsed=true; moved=false;
+    if(e.touches.length===2){ d0=dist(e.touches); s0=scale; m0=mid(e.touches); t0x=tx; t0y=ty; }
+    else if(e.touches.length===1 && scale>1){ pan={x:e.touches[0].clientX-tx, y:e.touches[0].clientY-ty}; }
+  }, {passive:true});
+  d.addEventListener("touchmove", e=>{
+    if(e.touches.length===2 && d0){
+      moved=true; scale=s0*(dist(e.touches)/d0);
+      const m=mid(e.touches); tx=t0x+(m.x-m0.x); ty=t0y+(m.y-m0.y);
+      clamp(); apply();
+    } else if(e.touches.length===1 && pan && scale>1){
+      moved=true; tx=e.touches[0].clientX-pan.x; ty=e.touches[0].clientY-pan.y; apply();
+    }
+  }, {passive:true});
+  d.addEventListener("touchend", e=>{
+    d0=0; pan=null;
+    if(e.touches.length) return;
+    clamp(); apply();
+    if(!moved && scale===1) popOverlaySync();   // 확대 안 된 상태에서 그냥 탭 = 닫기
+  });
+  d.addEventListener("click", ()=>{ if(!touchUsed) popOverlaySync(); }); // 데스크톱 클릭
 }
 // 네이티브 confirm()은 Artifact 샌드박스에서 동작하지 않아 자체 확인창 사용
 function confirmDialog(msg, onYes, opts){
@@ -1662,6 +1690,12 @@ function openLogForm(id, presetHid){
       <div class="seg" data-seg="contractType">
         ${CONTRACT_TYPES.map(c=>`<button type="button" data-v="${c}" class="${(l.contractType||"C")===c?"on":""}">${c}</button>`).join("")}
       </div><input type="hidden" name="contractType" value="${esc(l.contractType||"C")}"></div>
+
+    <div class="field" data-when="COLDHEAD"><label>Cold Head</label>
+      <div class="seg" data-seg="coldheadPos">
+        ${["A2","A3"].map(c=>`<button type="button" data-v="${c}" class="${l.coldheadPos===c?"on":""}">${c}</button>`).join("")}
+      </div><input type="hidden" name="coldheadPos" value="${esc(l.coldheadPos||"")}">
+      <span class="hint">선택하면 제목이 "Cold Head A2" 형태로 자동 입력됩니다.</span></div>
 
     <div class="grid2">
       <div class="field"><label>병원 *</label>
@@ -2000,12 +2034,12 @@ function openLogForm(id, presetHid){
     const seg = e.target.closest("[data-seg] button");
     if(seg){ const wrap=seg.closest("[data-seg]"); wrap.querySelectorAll("button").forEach(b=>b.classList.remove("on"));
       seg.classList.add("on"); form[wrap.dataset.seg].value = seg.dataset.v; syncConditional();
-      if(wrap.dataset.seg==="type" || wrap.dataset.seg==="acrKind"){
-        const autoTitles = ["정기 예방점검","Planned Maintenance", ...Object.values(ACR_KINDS).map(v=>v.label)];
-        if(form.type.value==="PM"){
-          if(!form.title.value.trim() || autoTitles.includes(form.title.value.trim()))
-            form.title.value = "Planned Maintenance";
-        } else if(["REPAIR","COLDHEAD","ACR","ETC"].includes(form.type.value)){
+      if(wrap.dataset.seg==="type" || wrap.dataset.seg==="acrKind" || wrap.dataset.seg==="coldheadPos"){
+        const autoTitles = ["정기 예방점검","Planned Maintenance","Cold Head A2","Cold Head A3", ...Object.values(ACR_KINDS).map(v=>v.label)];
+        const auto = v => (!form.title.value.trim() || autoTitles.includes(form.title.value.trim())) && (form.title.value = v);
+        if(form.type.value==="PM") auto("Planned Maintenance");
+        else if(form.type.value==="COLDHEAD" && form.coldheadPos.value) auto("Cold Head " + form.coldheadPos.value);
+        else if(["REPAIR","COLDHEAD","ACR","ETC"].includes(form.type.value)){
           if(autoTitles.includes(form.title.value.trim())) form.title.value = "";
         }
       }
@@ -2058,11 +2092,12 @@ function openLogForm(id, presetHid){
     e.preventDefault();
     const fd = new FormData(form);
     const obj = editing ? Object.assign({}, editing) : {};
-    ["type","acrKind","contractType","hospitalId","date","systemModel","engineer","title","symptom","description","parts","workStart","workEnd","heLevel","status","followUp"]
+    ["type","acrKind","contractType","coldheadPos","hospitalId","date","systemModel","engineer","title","symptom","description","parts","workStart","workEnd","heLevel","status","followUp"]
       .forEach(k=> obj[k] = (fd.get(k)||"").toString().trim());
     if(!obj.hospitalId){ toast("병원을 선택하세요"); return; }
     if(obj.type!=="ACR") obj.acrKind = "";
     if(obj.type!=="PM") obj.contractType = "";
+    if(obj.type!=="COLDHEAD") obj.coldheadPos = "";
     obj.countsAsPm = (obj.type!=="PM") ? !!fd.get("countsAsPm") : false;
     obj.hospitalName = hospById(obj.hospitalId)?.name || "";
     const tRe = /^([01]?\d|2[0-3]):[0-5]\d$/;
