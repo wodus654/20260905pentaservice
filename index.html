@@ -1385,18 +1385,13 @@ function logRow(l){
   </button>`;
 }
 
-function viewHospitals(){
-  const q = (route.q.s||"").toLowerCase();
+function hospitalListBody(){
+  const q = (route.q.s||"").toLowerCase().trim();
   let list = [...store.hospitals].sort(koSort);
   if(q) list = list.filter(h => (h.name+" "+(h.region||"")).toLowerCase().includes(q));
-
-  $("#view").innerHTML = head("병원", `${store.hospitals.length}곳 · MRI ${store.hospitals.reduce((n,h)=>n+(h.systems||[]).length,0)}대`) + `<div class="wrap">
-    ${connBanner()}
-    <div class="filters">
-      <input type="search" placeholder="병원명 · 지역 검색" value="${esc(route.q.s||"")}" data-filter="s">
-      <button class="btn primary" data-action="new-hospital">${ICONS.plus} 병원 추가</button>
-    </div>
-    ${ list.length ? `<div class="rows">${list.map(h=>{
+  if(!list.length) return `<div class="card empty">${ICONS.hosp}<div>${q?"검색 결과가 없습니다.":"등록된 병원이 없습니다."}</div>
+      ${q?"":`<button class="btn primary" style="margin-top:12px" data-action="new-hospital">병원 추가</button>`}</div>`;
+  return `<div class="rows">${list.map(h=>{
       const next = upcomingItems(h).filter(x=>x.days!=null).sort((a,b)=>a.days-b.days)[0];
       let chip = "";
       if(next) chip = `<span class="chip ${next.days<0?"overdue":next.days<=14?"soon":"muted"}">${esc(next.kind==="PM"?"PM":next.label)} ${next.days<0?`${-next.days}일 지남`:`D-${next.days}`}</span>`;
@@ -1410,8 +1405,16 @@ function viewHospitals(){
         </div></div>
         <div class="rright">${chip}</div>
       </button>`;
-    }).join("")}</div>` : `<div class="card empty">${ICONS.hosp}<div>${q?"검색 결과가 없습니다.":"등록된 병원이 없습니다."}</div>
-      ${q?"":`<button class="btn primary" style="margin-top:12px" data-action="new-hospital">병원 추가</button>`}</div>` }
+    }).join("")}</div>`;
+}
+function viewHospitals(){
+  $("#view").innerHTML = head("병원", `${store.hospitals.length}곳 · MRI ${store.hospitals.reduce((n,h)=>n+(h.systems||[]).length,0)}대`) + `<div class="wrap">
+    ${connBanner()}
+    <div class="filters">
+      <input type="search" placeholder="병원명 · 지역 검색" value="${esc(route.q.s||"")}" data-filter="s">
+      <button class="btn primary" data-action="new-hospital">${ICONS.plus} 병원 추가</button>
+    </div>
+    <div id="listbody">${hospitalListBody()}</div>
   </div>`;
 }
 
@@ -1476,28 +1479,35 @@ function viewHospital(){
   </div>`;
 }
 
-function viewLogs(){
+function logListFiltered(){
   const q = route.q;
   let list = store.logs.filter(l=>!l.deleted).sort(byDateDesc);
   if(q.hid) list = list.filter(l=>l.hospitalId===q.hid);
   if(q.type) list = list.filter(l=>l.type===q.type);
   if(q.status==="open") list = list.filter(l=>l.status && l.status!=="done");
   else if(q.status) list = list.filter(l=>l.status===q.status);
-  const term = (q.s||"").toLowerCase();
+  const term = (q.s||"").toLowerCase().trim();
   if(term) list = list.filter(l => (`${l.title} ${l.description} ${l.parts} ${l.symptom} ${hospById(l.hospitalId)?.name||l.hospitalName||""} ${l.systemModel}`).toLowerCase().includes(term));
-
+  return list;
+}
+function logListBody(){
+  const list = logListFiltered();
+  return list.length ? `<div class="rows">${list.map(logRow).join("")}</div>`
+    : `<div class="card empty">${ICONS.logs}<div>조건에 맞는 일지가 없습니다.</div></div>`;
+}
+function viewLogs(){
+  const q = route.q;
   const opt = (v,cur,lbl)=>`<option value="${v}" ${cur===v?"selected":""}>${lbl}</option>`;
-  $("#view").innerHTML = head("작업일지", `${list.length}건`) + `<div class="wrap">
+  $("#view").innerHTML = head("작업일지", `${logListFiltered().length}건`) + `<div class="wrap">
     ${connBanner()}
     <div class="filters">
       <input type="search" placeholder="제목 · 조치내용 · 부품 검색" value="${esc(q.s||"")}" data-filter="s">
       <select data-filter="type"><option value="">전체 구분</option>${Object.entries(TYPES).map(([k,v])=>opt(k,q.type||"",v.label)).join("")}</select>
       <select data-filter="status"><option value="">전체 상태</option>${Object.entries(STATUS).map(([k,v])=>opt(k,q.status||"",v.label)).join("")}</select>
       <select data-filter="hid"><option value="">전체 병원</option>${store.hospitals.slice().sort(koSort).map(h=>opt(h.id,q.hid||"",esc(h.name))).join("")}</select>
-      <button class="btn sm" data-action="export" ${list.length?"":"disabled"}>CSV 내보내기</button>
+      <button class="btn sm" data-action="export" ${logListFiltered().length?"":"disabled"}>CSV 내보내기</button>
     </div>
-    ${ list.length ? `<div class="rows">${list.map(logRow).join("")}</div>`
-      : `<div class="card empty">${ICONS.logs}<div>조건에 맞는 일지가 없습니다.</div></div>` }
+    <div id="listbody">${logListBody()}</div>
   </div>`;
 }
 
@@ -2740,27 +2750,49 @@ function currentLogList(){
 }
 
 // filters (search/select) -> update hash query
+function syncFilterHash(f){
+  const base = parseHash();
+  const q = Object.assign({}, base.q);
+  const v = (f.value||"").trim();
+  if(v) q[f.dataset.filter]=v; else delete q[f.dataset.filter];
+  const qs = new URLSearchParams(q).toString();
+  history.replaceState(null,"", "#/"+base.path+(qs?"?"+qs:""));
+}
+// 검색 입력: render() 로 전체를 다시 그리면 <input> 요소가 파괴돼서
+// 안드로이드 한글 IME 조합이 끊긴다("ㅅㅏㅇㅜㅓㄴ"처럼 자모가 흩어짐).
+// 그래서 검색어 입력은 목록 컨테이너(#listbody)만 갈아끼우고 입력창은 건드리지 않는다.
+function refreshListBody(){
+  const box = $("#listbody"); if(!box) return;
+  const p = route.path;
+  if(p==="hospitals") box.innerHTML = hospitalListBody();
+  else if(p==="logs"){
+    box.innerHTML = logListBody();
+    const sub = $("#view .viewhead .sub"); if(sub) sub.textContent = logListFiltered().length + "건";
+  }
+}
+function runSearchFilter(f){
+  syncFilterHash(f);
+  route = parseHash();
+  refreshListBody();
+}
 document.addEventListener("input", e=>{
   const f = e.target.closest("[data-filter]");
   if(!f) return;
+  if(f.type==="search"){
+    if(e.isComposing) return;          // 한글 조합 중 — compositionend 때 처리
+    clearTimeout(document._ft);
+    document._ft = setTimeout(()=> runSearchFilter(f), 150);
+    return;
+  }
   clearTimeout(document._ft);
-  document._ft = setTimeout(()=>{
-    const base = parseHash();
-    const q = Object.assign({}, base.q);
-    const v = f.value.trim();
-    if(v) q[f.dataset.filter]=v; else delete q[f.dataset.filter];
-    const qs = new URLSearchParams(q).toString();
-    history.replaceState(null,"", "#/"+base.path+(qs?"?"+qs:""));
-    // re-render list body only for search to keep focus
-    if(f.type==="search"){ renderListKeepFocus(f); } else { render(); }
-  }, f.type==="search"?200:0);
+  document._ft = setTimeout(()=>{ syncFilterHash(f); render(); }, 0);
 });
-function renderListKeepFocus(input){
-  const val = input.value, pos = input.selectionStart;
-  render();
-  const again = document.querySelector(`[data-filter="${input.dataset.filter}"]`);
-  if(again){ again.focus(); try{ again.setSelectionRange(pos,pos); }catch(e){} }
-}
+document.addEventListener("compositionend", e=>{
+  const f = e.target.closest && e.target.closest("[data-filter]");
+  if(!f || f.type!=="search") return;
+  clearTimeout(document._ft);
+  document._ft = setTimeout(()=> runSearchFilter(f), 60);
+});
 
 let scrollTopNext = false;
 window.addEventListener("hashchange", ()=>{ closePanelSoft(); render(); if(scrollTopNext){ scrollTopNext = false; window.scrollTo(0, 0); } });
