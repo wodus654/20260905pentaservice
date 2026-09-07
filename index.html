@@ -1406,6 +1406,7 @@ function viewHospitals(){
           ${h.region?`<span>${esc(h.region)}</span>`:""}
           <span>MRI ${(h.systems||[]).length}대</span>
           <span>최근 PM ${lastPmDate(h.id)?fmtDate(lastPmDate(h.id)):"—"}</span>
+          <span>최근 ACR ${(()=>{ const a = latestLog(h.id, l=>l.type==="ACR" && l.acrKind!=="pretest"); return a?fmtDate(a.date):"—"; })()}</span>
         </div></div>
         <div class="rright">${chip}</div>
       </button>`;
@@ -1442,7 +1443,6 @@ function viewHospital(){
         <div class="kv"><span class="kk">최근 PM</span><span class="vv tnum">${pm.last?fmtDate(pm.last):"—"}</span></div>
         <div class="kv"><span class="kk">다음 ACR 정밀 (3년)</span><span class="vv tnum">${acr.full.due?fmtDate(acr.full.due):"미정"} ${dueChip(acr.full)}</span>${dueEdit("acrFullOverride", acr.full.due)}</div>
         <div class="kv"><span class="kk">다음 ACR 서류 (매년)</span><span class="vv tnum">${acr.doc.covered?`<span style="color:var(--ink-3)">${acr.doc.due?new Date(acr.doc.due).getFullYear():""}년 정밀 시행 → 서류 생략</span>`:(acr.doc.due?fmtDate(acr.doc.due):"미정")} ${acr.doc.covered?"":dueChip(acr.doc)}</span>${acr.doc.covered?"":dueEdit("acrDocOverride", acr.doc.due)}</div>
-        ${(()=>{ const la = latestLog(h.id, l=>l.type==="ACR" && l.acrKind!=="pretest"); const kt = la ? (la.acrKind==="full"?` <span class="chip acr">정밀</span>`:la.acrKind==="doc"?` <span class="chip muted">서류</span>`:"") : ""; return `<div class="kv"><span class="kk">최근 ACR</span><span class="vv tnum">${la?fmtDate(la.date)+kt:"—"}</span></div>`; })()}
       </div>
       ${h.address?`<div class="kv"><span class="kk">주소</span><span class="vv">${esc(h.address)}</span></div>`:""}
       ${h.notes?`<div class="kv"><span class="kk">메모</span><span class="vv">${esc(h.notes)}</span></div>`:""}
