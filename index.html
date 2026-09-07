@@ -842,7 +842,7 @@ function canLog(){ const r = role(); return r === "admin" || r === "logger"; } /
 // logger 계정이 예외적으로 허용되는 클릭 액션 (새 일지 작성 흐름만)
 const LOGGER_OK_ACTIONS = new Set(["new-log"]);
 const MUTATING_ACTIONS = new Set(["new-log","edit-log","delete-log","new-hospital","edit-hospital","delete-hospital",
-  "clear-samples","restore-log","purge-log","empty-trash","prep-done","prep-del","del-schedule"]);
+  "clear-samples","restore-log","purge-log","empty-trash","prep-done","prep-del","del-schedule","edit-schedule"]);
 function renderLogin(){
   const lv = $("#loginview");
   lv.innerHTML = `<form id="loginform" class="logincard">
@@ -2499,9 +2499,10 @@ function openDay(dateStr){
       <h3>등록한 일정</h3>
       ${sched.length ? sched.map(s=>{
         const t = scheduleTypeInfo(s.type);
-        return `<div class="mini"><span class="mtext"><span class="chip ${t[2]}">${esc(t[1])}</span> ${esc(s.hospitalName)}${s.note?` — ${esc(s.note)}`:""}</span>
+        return `<div class="mini"><span class="mtext" data-action="edit-schedule" data-id="${s.id}" style="cursor:pointer"><span class="chip ${t[2]}">${esc(t[1])}</span> ${esc(s.hospitalName)}${s.note?` — ${esc(s.note)}`:""}</span>
           <button type="button" class="prepx" data-action="del-schedule" data-id="${s.id}" data-date="${dateStr}" aria-label="삭제">×</button></div>`;
       }).join("") : `<div class="empty" style="padding:10px 0">등록된 일정이 없습니다.</div>`}
+      ${sched.length && canEdit() ? `<div class="hint">일정을 눌러 수정할 수 있습니다.</div>` : ""}
     </div>
     <form class="card formcard" data-schedule-add="${dateStr}">
       <h3>일정 추가</h3>
@@ -2514,6 +2515,43 @@ function openDay(dateStr){
     </form>
   `);
   setPanelTitle(fmtDate(dateStr) + " 일정");
+}
+
+function openScheduleEdit(id){
+  if(!canEdit()){ toast("이 계정은 일정을 수정할 수 없습니다"); return; }
+  const s = store.schedule.find(x=>x.id===id);
+  if(!s){ toast("일정을 찾을 수 없습니다"); return; }
+  const backDate = s.date;
+  const hospOpts = store.hospitals.slice().sort(koSort)
+    .map(h=>`<option value="${h.id}" ${s.hospitalId===h.id?"selected":""}>${esc(h.name)}</option>`).join("");
+  openPanel(`
+    <form class="card formcard" id="schededit">
+      <h3>일정 수정</h3>
+      <div class="field"><label>날짜</label><input type="date" name="date" value="${esc(s.date)}" required></div>
+      <div class="field"><label>병원</label>
+        <select name="hospitalId" required>${hospOpts}</select></div>
+      <div class="field"><label>구분</label>
+        <select name="type">${SCHEDULE_TYPE_OPTS.map(([v,l])=>`<option value="${v}" ${s.type===v?"selected":""}>${esc(l)}</option>`).join("")}</select></div>
+      <div class="field"><label>메모</label><input name="note" value="${esc(s.note||"")}" placeholder="예: 오전 방문 예정"></div>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button type="submit" class="btn primary" style="flex:1">저장</button>
+        <button type="button" class="btn danger" data-action="del-schedule" data-id="${s.id}" data-date="${backDate}">삭제</button>
+      </div>
+    </form>
+  `);
+  setPanelTitle("일정 수정");
+  $("#schededit").addEventListener("submit", async e=>{
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const hid = fd.get("hospitalId");
+    const h = hospById(hid);
+    await saveDoc("schedule", Object.assign({}, s, {
+      hospitalId: hid, hospitalName: h?h.name:"", date: fd.get("date"),
+      type: fd.get("type")||"ETC", note: (fd.get("note")||"").trim()
+    }));
+    toast("일정을 수정했습니다");
+    openDay(fd.get("date"));
+  });
 }
 
 /* ---- 휴지통 ---- */
@@ -2660,6 +2698,7 @@ document.addEventListener("click", e=>{
     if(act==="cal-today") calShift("today"); else calShift(act==="cal-next"?1:-1);
     return; }
   if(act==="open-day") return openDay(a.dataset.date);
+  if(act==="edit-schedule") return openScheduleEdit(id);
   if(act==="del-schedule"){ delSchedule(id); openDay(a.dataset.date); return; }
 });
 document.addEventListener("change", e=>{
