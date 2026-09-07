@@ -1699,6 +1699,9 @@ function openLogDetail(id){
         <div class="kv"><span class="kk">담당 엔지니어</span><span class="vv">${esc(l.engineer||"—")}</span></div>
         <div class="kv"><span class="kk">소요 시간</span><span class="vv tnum">${dur!=null?dur+"분":"—"}</span></div>
         ${l.contractType?`<div class="kv"><span class="kk">계약 구분</span><span class="vv">${esc(l.contractType)}</span></div>`:""}
+        ${l.coldheadPos?`<div class="kv"><span class="kk">Cold Head</span><span class="vv">${esc(l.coldheadPos)}</span></div>`:""}
+        ${l.coldheadSerial?`<div class="kv"><span class="kk">Serial Number</span><span class="vv mono">${esc(l.coldheadSerial)}</span></div>`:""}
+        ${l.coldheadInDate?`<div class="kv"><span class="kk">입고일</span><span class="vv tnum">${fmtDate(l.coldheadInDate)}</span></div>`:""}
         ${l.heLevel?`<div class="kv"><span class="kk">헬륨 레벨</span><span class="vv mono">${esc(l.heLevel)}%</span></div>`:""}
       </div>
       ${l.symptom?kvBlock("증상 / 요청사항", l.symptom):""}
@@ -1849,6 +1852,12 @@ function openLogForm(id, presetHid){
         ${["A2","A3"].map(c=>`<button type="button" data-v="${c}" class="${l.coldheadPos===c?"on":""}">${c}</button>`).join("")}
       </div><input type="hidden" name="coldheadPos" value="${esc(l.coldheadPos||"")}">
       <span class="hint">선택하면 제목이 "Cold Head A2" 형태로 자동 입력됩니다.</span></div>
+
+    <div class="grid2" data-when="COLDHEAD">
+      <div class="field"><label>Serial Number</label><input name="coldheadSerial" value="${esc(l.coldheadSerial||"")}" placeholder="Cold Head 시리얼 번호"></div>
+      <div class="field"><label>입고일 (DATE)</label><input type="date" name="coldheadInDate" value="${esc(l.coldheadInDate||"")}">
+        <span class="hint">최종 수리되어 입고된 날짜</span></div>
+    </div>
 
     <div class="grid2">
       <div class="field"><label>병원 *</label>
@@ -2250,12 +2259,12 @@ function openLogForm(id, presetHid){
     e.preventDefault();
     const fd = new FormData(form);
     const obj = editing ? Object.assign({}, editing) : {};
-    ["type","acrKind","contractType","coldheadPos","hospitalId","date","systemModel","engineer","title","symptom","description","parts","workStart","workEnd","heLevel","status","followUp"]
+    ["type","acrKind","contractType","coldheadPos","coldheadSerial","coldheadInDate","hospitalId","date","systemModel","engineer","title","symptom","description","parts","workStart","workEnd","heLevel","status","followUp"]
       .forEach(k=> obj[k] = (fd.get(k)||"").toString().trim());
     if(!obj.hospitalId){ toast("병원을 선택하세요"); return; }
     if(obj.type!=="ACR") obj.acrKind = "";
     if(obj.type!=="PM") obj.contractType = "";
-    if(obj.type!=="COLDHEAD") obj.coldheadPos = "";
+    if(obj.type!=="COLDHEAD"){ obj.coldheadPos = ""; obj.coldheadSerial = ""; obj.coldheadInDate = ""; }
     obj.countsAsPm = (obj.type!=="PM") ? !!fd.get("countsAsPm") : false;
     obj.hospitalName = hospById(obj.hospitalId)?.name || "";
     const tRe = /^([01]?\d|2[0-3]):[0-5]\d$/;
