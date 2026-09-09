@@ -824,7 +824,11 @@ const ICONS = {
 let db = null;
 let dbState = "connecting"; // connecting | ready | offline
 const store = { hospitals:[], logs:[], photos:[], prep:[], schedule:[] };
-let calMonth = new Date().toISOString().slice(0,7); // "YYYY-MM", 대시보드 달력 상태
+// 한국시간(KST, UTC+9) 기준 "YYYY-MM-DD" — 기기 시간대와 무관하게 항상 한국 날짜.
+// (toISOString()은 UTC 기준이라 KST 자정~오전 9시 사이에는 어제 날짜가 나오는 문제가 있었음)
+const _kstFmt = new Intl.DateTimeFormat("en-CA", { timeZone:"Asia/Seoul", year:"numeric", month:"2-digit", day:"2-digit" });
+const kstDateStr = (d) => _kstFmt.format(d || new Date());
+let calMonth = kstDateStr().slice(0,7); // "YYYY-MM", 대시보드 달력 상태
 let route = parseHash();
 const local = {
   get(k,d){ try{ const v=localStorage.getItem("mri."+k); return v==null?d:JSON.parse(v);}catch(e){return d;} },
@@ -880,14 +884,14 @@ function logout(){
 const $ = (s,r)=> (r||document).querySelector(s);
 const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
-const todayStr = () => new Date().toISOString().slice(0,10);
+const todayStr = () => kstDateStr(); // 한국시간 기준 오늘
 const WEEKDAY_KO = ["일","월","화","수","목","금","토"];
 function fmtDate(s){ if(!s) return "—"; const d=new Date(s+"T00:00:00"); if(isNaN(d)) return esc(s);
   return `${d.getFullYear()}. ${d.getMonth()+1}. ${d.getDate()}. (${WEEKDAY_KO[d.getDay()]})`; }
 function relDays(s){ if(!s) return null; const d=new Date(s+"T00:00:00"); if(isNaN(d)) return null;
   return Math.round((d - new Date(todayStr()+"T00:00:00"))/86400000); }
 function addMonths(s,m){ const d=new Date(s+"T00:00:00"); if(isNaN(d))return null; d.setMonth(d.getMonth()+m);
-  return d.toISOString().slice(0,10); }
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function toast(msg, action){
   const t=$("#toast");
   t.innerHTML = esc(msg) + (action ? ' <button type="button" class="toastbtn">'+esc(action.label)+'</button>' : "");
@@ -1006,7 +1010,7 @@ async function delSchedule(id){ await deleteDoc("schedule", id); }
 let calAnimDir = 0; // -1 이전달, 1 다음달 — 다음 렌더에서 슬라이드 인 방향
 function calShift(delta){
   if(delta==="today"){
-    const t = new Date().toISOString().slice(0,7);
+    const t = kstDateStr().slice(0,7);
     calAnimDir = t < calMonth ? -1 : t > calMonth ? 1 : 0;
     calMonth = t;
   } else {
@@ -1254,8 +1258,7 @@ function calendarHtml(){
 }
 function viewDash(){
   const logs = store.logs.filter(l=>!l.deleted).sort(byDateDesc);
-  const now = new Date();
-  const mKey = now.toISOString().slice(0,7);
+  const mKey = kstDateStr().slice(0,7);
   const thisMonth = logs.filter(l => (l.date||"").slice(0,7)===mKey);
   const openCnt = logs.filter(l => l.status && l.status!=="done").length;
   const WINDOW = 45;
