@@ -888,7 +888,9 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7
 // 지나치게 길어지면(붙여넣기 등) TEXTAREA_MAX_H에서 멈추고 그 안에서 스크롤한다.
 const TEXTAREA_MAX_H = 420;
 function autoGrowTextarea(el){
-  el.style.height = "auto";
+  // "auto" 대신 "0px"로 먼저 리셋 — 일부 모바일 브라우저(특히 WebKit 계열)는 height:auto 직후
+  // scrollHeight를 재계산하지 않고 이전 값을 그대로 돌려주는 경우가 있어, 확실히 0으로 찌그러뜨린 뒤 잰다.
+  el.style.height = "0px";
   const h = Math.min(el.scrollHeight, TEXTAREA_MAX_H);
   el.style.height = h + "px";
   el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_H ? "auto" : "hidden";
@@ -899,6 +901,8 @@ function autoGrowVisibleTextareas(root){
   (root||document).querySelectorAll("textarea").forEach(t=>{ if(t.offsetParent!==null) autoGrowTextarea(t); });
 }
 document.addEventListener("input", e=>{ if(e.target.tagName==="TEXTAREA") autoGrowTextarea(e.target); });
+// 일부 안드로이드 키보드(삼성 키보드 등)는 글자마다 input 이벤트를 안정적으로 보내지 않는 경우가 있어 keyup도 보조로 건다.
+document.addEventListener("keyup", e=>{ if(e.target.tagName==="TEXTAREA") autoGrowTextarea(e.target); });
 const todayStr = () => kstDateStr(); // 한국시간 기준 오늘
 const WEEKDAY_KO = ["일","월","화","수","목","금","토"];
 function fmtDate(s){ if(!s) return "—"; const d=new Date(s+"T00:00:00"); if(isNaN(d)) return esc(s);
