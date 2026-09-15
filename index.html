@@ -137,7 +137,7 @@ a{color:var(--accent)}
 .field input,.field select,.field textarea{width:100%;padding:9px 11px;border:1px solid var(--border-strong);
   border-radius:8px;background:var(--surface);color:var(--ink)}
 .field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
-.field textarea{resize:vertical;min-height:76px;line-height:1.55}
+.field textarea{resize:none;min-height:76px;line-height:1.55;overflow:hidden}
 .field .hint{font-size:12px;color:var(--ink-3);text-transform:none;font-weight:400}
 .grid2{display:grid;grid-template-columns:1fr;gap:14px}
 @media(min-width:560px){.grid2{grid-template-columns:1fr 1fr}}
@@ -884,6 +884,21 @@ function logout(){
 const $ = (s,r)=> (r||document).querySelector(s);
 const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+// 입력 내용에 맞춰 textarea 높이를 자동으로 늘려준다(증상/조치내용 등이 길어질 때 스크롤 대신 칸이 커지도록).
+// 지나치게 길어지면(붙여넣기 등) TEXTAREA_MAX_H에서 멈추고 그 안에서 스크롤한다.
+const TEXTAREA_MAX_H = 420;
+function autoGrowTextarea(el){
+  el.style.height = "auto";
+  const h = Math.min(el.scrollHeight, TEXTAREA_MAX_H);
+  el.style.height = h + "px";
+  el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_H ? "auto" : "hidden";
+}
+// 화면에 실제로 보이는 textarea만 크기를 맞춘다 — data-when 등으로 아직 숨겨진 상태(offsetParent===null)에서
+// 재면 scrollHeight가 0으로 나와 높이가 찌그러진다.
+function autoGrowVisibleTextareas(root){
+  (root||document).querySelectorAll("textarea").forEach(t=>{ if(t.offsetParent!==null) autoGrowTextarea(t); });
+}
+document.addEventListener("input", e=>{ if(e.target.tagName==="TEXTAREA") autoGrowTextarea(e.target); });
 const todayStr = () => kstDateStr(); // 한국시간 기준 오늘
 const WEEKDAY_KO = ["일","월","화","수","목","금","토"];
 function fmtDate(s){ if(!s) return "—"; const d=new Date(s+"T00:00:00"); if(isNaN(d)) return esc(s);
@@ -1560,6 +1575,10 @@ function openPanel(html){
     <h2 id="panel-title"></h2>
   </div><div class="pbody" id="pbody"></div></div>`;
   $("#pbody").innerHTML = html;
+  // 조건부 필드(data-when 등)의 보이기/숨기기가 끝난 뒤(같은 틱의 나머지 동기 코드 실행 후) 높이를 잰다.
+  // requestAnimationFrame은 화면이 그려지지 않는 상태(백그라운드 탭 등)에서 아예 실행되지 않을 수 있어
+  // setTimeout(0)을 쓴다 — 페인트와 무관하게 다음 매크로태스크에서 항상 실행된다.
+  setTimeout(()=> autoGrowVisibleTextareas($("#pbody")), 0);
   document.body.style.overflow="hidden";
   if(!panelOverlayActive){
     panelOverlayActive = true;
@@ -2144,6 +2163,8 @@ function openLogForm(id, presetHid){
     form.querySelectorAll("[data-when]").forEach(el=> el.style.display = el.dataset.when.split(" ").includes(type) ? "" : "none");
     form.querySelectorAll("[data-when-status]").forEach(el=> el.style.display = el.dataset.whenStatus.split(" ").includes(status) ? "" : "none");
     form.querySelectorAll("[data-when-acr]").forEach(el=> el.style.display = (type==="ACR" && el.dataset.whenAcr.split(" ").includes(acrKind)) ? "" : "none");
+    // 숨겨져 있던 textarea가 다시 보이면(display:none 동안엔 scrollHeight가 0이라) 높이를 다시 계산
+    autoGrowVisibleTextareas(form);
   }
   renderAcrFull(); renderPm(); syncConditional();
   updateSysDatalist(form.hospitalId.value);
