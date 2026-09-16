@@ -907,6 +907,16 @@ const todayStr = () => kstDateStr(); // 한국시간 기준 오늘
 const WEEKDAY_KO = ["일","월","화","수","목","금","토"];
 function fmtDate(s){ if(!s) return "—"; const d=new Date(s+"T00:00:00"); if(isNaN(d)) return esc(s);
   return `${d.getFullYear()}. ${d.getMonth()+1}. ${d.getDate()}. (${WEEKDAY_KO[d.getDay()]})`; }
+// "N월 N주차" — 월요일이 아니라 일요일 시작 주 기준(달력 표시와 동일한 기준).
+// 1일이 속한 주가 1주차이며, 해당 월 안에서만 센다(전월 말일이 같은 주여도 그 달의 마지막 주차로 따로 셈).
+function weekOfMonthLabel(s){
+  if(!s) return null;
+  const d = new Date(s+"T00:00:00"); if(isNaN(d)) return null;
+  const y = d.getFullYear(), m = d.getMonth()+1, day = d.getDate();
+  const firstDow = new Date(y, m-1, 1).getDay(); // 0=일요일
+  const week = Math.ceil((day + firstDow) / 7);
+  return { key: `${y}-${String(m).padStart(2,"0")}-${week}`, label: `${y}년 ${m}월 ${week}주차` };
+}
 function relDays(s){ if(!s) return null; const d=new Date(s+"T00:00:00"); if(isNaN(d)) return null;
   return Math.round((d - new Date(todayStr()+"T00:00:00"))/86400000); }
 function addMonths(s,m){ const d=new Date(s+"T00:00:00"); if(isNaN(d))return null; d.setMonth(d.getMonth()+m);
@@ -1514,8 +1524,20 @@ function logListFiltered(){
 }
 function logListBody(){
   const list = logListFiltered();
-  return list.length ? `<div class="rows">${list.map(logRow).join("")}</div>`
-    : `<div class="card empty">${ICONS.logs}<div>조건에 맞는 일지가 없습니다.</div></div>`;
+  if(!list.length) return `<div class="card empty">${ICONS.logs}<div>조건에 맞는 일지가 없습니다.</div></div>`;
+  // list는 이미 최신순으로 정렬돼 있으므로, 같은 주차가 끊기지 않게 이어지는 동안만 한 그룹으로 묶는다.
+  const groups = [];
+  list.forEach(l=>{
+    const wk = weekOfMonthLabel(l.date);
+    const key = wk ? wk.key : "__nodate__";
+    const g = groups[groups.length-1];
+    if(!g || g.key!==key) groups.push({ key, label: wk?wk.label:"날짜 없음", items:[l] });
+    else g.items.push(l);
+  });
+  return groups.map(g=>`
+    <div class="section-t weeksec"><h2>${esc(g.label)}</h2><span class="rmeta" style="font-size:11.5px">${g.items.length}건</span></div>
+    <div class="rows">${g.items.map(logRow).join("")}</div>
+  `).join("");
 }
 function viewLogs(){
   const q = route.q;
