@@ -228,7 +228,7 @@ a{color:var(--accent)}
 .kvgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 
 /* systems / acr mini rows */
-.mini{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}
+.mini{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}
 .mini:last-child{border-bottom:0}
 .mini .mtext{flex:1;min-width:0}
 .mini.duemini{flex-wrap:wrap}
@@ -1877,14 +1877,17 @@ function renderAcrFullDetail(af, systemModel){
 }
 
 /* ---- log form ---- */
-function openLogForm(id, presetHid){
+function openLogForm(id, preset){
   if(id && !canEdit()){ toast("이 계정은 기존 일지를 수정할 수 없습니다"); return; }
   if(!id && !canLog()){ toast("보기 전용 계정입니다"); return; }
   const editing = id ? store.logs.find(x=>x.id===id) : null;
+  const p = preset || {};
   const l = editing ? Object.assign({}, editing) : {
-    type:"PM", date: todayStr(), status:"done",
-    hospitalId: presetHid || local.get("lastHid","") || (store.hospitals[0]||{}).id || "",
+    type: (p.type && TYPES[p.type]) ? p.type : "PM",
+    date: p.date || todayStr(), status:"done",
+    hospitalId: p.hospitalId || local.get("lastHid","") || (store.hospitals[0]||{}).id || "",
     engineer: engineer,
+    description: p.note || "",
   };
   const hospOpts = store.hospitals.slice().sort(koSort)
     .map(h=>`<option value="${h.id}" ${l.hospitalId===h.id?"selected":""}>${esc(h.name)}</option>`).join("");
@@ -2547,6 +2550,7 @@ function openDay(dateStr){
         return `<div class="mini duemini">
         <span class="mtext"><span class="chip ${x.cls}">${esc(x.label)}</span> ${esc(x.hname)}</span>
         <button type="button" class="btn sm" data-go="hospital?id=${x.hid}">병원 보기</button>
+        ${canLog() ? `<button type="button" class="btn sm primary" data-action="new-log" data-hid="${x.hid}" data-date="${x.due}" data-type="${x.kind==="PM"?"PM":"ACR"}">일지 작성</button>` : ""}
         ${ovKey && canEdit() ? `<div class="duerow2">
           <label>예정일</label>
           <input type="date" value="${esc(x.due)}" data-due-edit data-hid="${x.hid}" data-ovkey="${ovKey}" data-back="${dateStr}">
@@ -2560,6 +2564,7 @@ function openDay(dateStr){
       ${sched.length ? sched.map(s=>{
         const t = scheduleTypeInfo(s.type);
         return `<div class="mini"><span class="mtext" data-action="edit-schedule" data-id="${s.id}" style="cursor:pointer"><span class="chip ${t[2]}">${esc(t[1])}</span> ${esc(s.hospitalName)}${s.note?` — ${esc(s.note)}`:""}</span>
+          ${canLog() ? `<button type="button" class="btn sm primary" data-action="new-log" data-hid="${s.hospitalId}" data-date="${s.date}" data-type="${s.type}" data-note="${esc(s.note||"")}">일지 작성</button>` : ""}
           <button type="button" class="prepx" data-action="del-schedule" data-id="${s.id}" data-date="${dateStr}" aria-label="삭제">×</button></div>`;
       }).join("") : `<div class="empty" style="padding:10px 0">등록된 일정이 없습니다.</div>`}
       ${sched.length && canEdit() ? `<div class="hint">일정을 눌러 수정할 수 있습니다.</div>` : ""}
@@ -2593,8 +2598,9 @@ function openScheduleEdit(id){
       <div class="field"><label>구분</label>
         <select name="type">${SCHEDULE_TYPE_OPTS.map(([v,l])=>`<option value="${v}" ${s.type===v?"selected":""}>${esc(l)}</option>`).join("")}</select></div>
       <div class="field"><label>메모</label><input name="note" value="${esc(s.note||"")}" placeholder="예: 오전 방문 예정"></div>
-      <div style="display:flex;gap:8px;margin-top:4px">
+      <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
         <button type="submit" class="btn primary" style="flex:1">저장</button>
+        ${canLog() ? `<button type="button" class="btn" data-action="new-log" data-hid="${s.hospitalId}" data-date="${s.date}" data-type="${s.type}" data-note="${esc(s.note||"")}">작업일지 작성</button>` : ""}
         <button type="button" class="btn danger" data-action="del-schedule" data-id="${s.id}" data-date="${backDate}">삭제</button>
       </div>
     </form>
@@ -2723,7 +2729,7 @@ document.addEventListener("click", e=>{
   if(act==="close-panel") return closePanel();
   if(act==="settings") return openSettings();
   if(act==="logout"){ closePanel(); logout(); return; }
-  if(act==="new-log") return openLogForm(null, a.dataset.hid);
+  if(act==="new-log") return openLogForm(null, { hospitalId:a.dataset.hid, date:a.dataset.date, type:a.dataset.type, note:a.dataset.note });
   if(act==="open-log") return openLogDetail(id);
   if(act==="edit-log"){ closePanelSoft(); return openLogForm(id); }
   if(act==="delete-log"){
