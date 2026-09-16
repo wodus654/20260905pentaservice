@@ -232,6 +232,7 @@ a{color:var(--accent)}
 .mini:last-child{border-bottom:0}
 .mini .mtext{flex:1;min-width:0}
 .mini.duemini{flex-wrap:wrap}
+.duemeta{flex-basis:100%;font-size:12px;color:var(--ink-3);padding-left:2px}
 .duerow2{flex-basis:100%;display:flex;align-items:center;gap:8px;padding-left:2px}
 .duerow2 label{font-size:12px;color:var(--ink-3);flex:0 0 auto}
 .duerow2 input[type=date]{flex:1;min-width:0;padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink)}
@@ -2578,10 +2579,12 @@ function openDay(dateStr){
         const ovKey = DUE_OVERRIDE_KEY[x.kind] || "";
         const h = hospById(x.hid);
         const hasOv = ovKey && h && h[ovKey];
+        const lastPm = lastPmDate(x.hid), lastVisit = lastVisitDate(x.hid);
         return `<div class="mini duemini">
         <span class="mtext"><span class="chip ${x.cls}">${esc(x.label)}</span> ${esc(x.hname)}</span>
         <button type="button" class="btn sm" data-go="hospital?id=${x.hid}">병원 보기</button>
         ${canLog() ? `<button type="button" class="btn sm primary" data-action="new-log" data-hid="${x.hid}" data-date="${x.due}" data-type="${x.kind==="PM"?"PM":"ACR"}">일지 작성</button>` : ""}
+        <div class="duemeta">최근 PM ${lastPm?fmtDate(lastPm):"—"} · 최근 방문 ${lastVisit?fmtDate(lastVisit):"—"}</div>
         ${ovKey && canEdit() ? `<div class="duerow2">
           <label>예정일</label>
           <input type="date" value="${esc(x.due)}" data-due-edit data-hid="${x.hid}" data-ovkey="${ovKey}" data-back="${dateStr}">
