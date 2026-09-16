@@ -1067,11 +1067,10 @@ function calendarDueMap(){
   });
   return map;
 }
-async function saveDoc(coll, obj){
-  const isNew = !obj.id;
-  // logger(sdc): 새 일지 작성 흐름(logs·photos·prep 신규 생성)만 허용, 기존 문서 수정은 불가
-  const loggerCreate = isNew && canLog() && (coll==="logs" || coll==="photos" || coll==="prep");
-  if(!canEdit() && !loggerCreate){ toast("이 계정은 데이터를 수정할 수 없습니다"); return obj; }
+// 권한 검사 없이 실제로 쓰기만 하는 저수준 함수. 이미 허용된 동작(예: 일지 저장)의
+// 부수효과로 다른 문서를 함께 갱신해야 할 때(예: pmOverride 자동 해제) 이걸 직접 쓴다 —
+// saveDoc()을 그대로 부르면 그 부수효과가 사용자의 canEdit() 권한에 걸려 막힐 수 있다.
+async function writeDocRaw(coll, obj){
   const now = new Date().toISOString();
   if(!obj.id){ obj = Object.assign({}, obj, {id:uid(), createdAt:now}); }
   obj.updatedAt = now;
@@ -1085,6 +1084,13 @@ async function saveDoc(coll, obj){
   try { await db.collection(coll).doc(id).set(body); }
   catch(e){ toast("저장 실패: " + (e.message||e.code||"알 수 없는 오류")); }
   return obj;
+}
+async function saveDoc(coll, obj){
+  const isNew = !obj.id;
+  // logger(sdc): 새 일지 작성 흐름(logs·photos·prep 신규 생성)만 허용, 기존 문서 수정은 불가
+  const loggerCreate = isNew && canLog() && (coll==="logs" || coll==="photos" || coll==="prep");
+  if(!canEdit() && !loggerCreate){ toast("이 계정은 데이터를 수정할 수 없습니다"); return obj; }
+  return writeDocRaw(coll, obj);
 }
 async function deleteDoc(coll, id){
   if(!canEdit()){ toast("보기 전용 계정입니다 — 데이터를 수정할 수 없습니다"); return; }
@@ -1164,6 +1170,30 @@ function acrInfo(h){
     full: { due:nextFull, days: nextFull?relDays(nextFull):null, last:lastFull?lastFull.date:null },
     doc:  { due:nextDoc,  days: nextDoc?relDays(nextDoc):null,  last:lastAny?lastAny.date:null, covered },
   };
+}
+// 실제 PM/ACR 일지가 저장되면, 수동으로 직접 지정해둔 예정일(pmOverride 등)은 낡은 값이 된다.
+// 그대로 두면 이후 계속 일지를 써도 대시보드가 예전 수동 지정 날짜 기준으로 계속 "지남"이라고
+// 표시한다(자동 계산이 override 때문에 아예 반영되지 않으므로) — 그래서 방금 저장한 일지가
+// 그 항목을 갱신시켰다면 해당 override는 자동으로 지운다. saveDoc()이 아니라 writeDocRaw()를
+// 직접 써서, 이 부수효과가 일지 저장 권한(logger도 가능)과 별개로 병원-수정 권한(canEdit)에
+// 걸려 막히지 않게 한다 — 이미 허용된 동작의 결과일 뿐, 새로운 병원 수정 행위가 아니다.
+async function clearStaleOverrides(l){
+  if(!l || l.deleted || !l.date) return;
+  const h = hospById(l.hospitalId); if(!h) return;
+  // 이 일지 날짜가 지정해둔 예정일보다 뒤(같은 날 포함)여야 "그 예정을 실제로 처리했다"고 볼 수 있다.
+  // 아직 예정일 전인 오래된/다른 일지 저장으로 미래의 정상적인 수동 지정을 지워버리면 안 된다.
+  const supersedes = ov => !!ov && l.date >= ov;
+  const clear = {};
+  if((l.type==="PM" || l.countsAsPm) && supersedes(h.pmOverride)) clear.pmOverride = "";
+  if(l.type==="ACR"){
+    if(l.acrKind==="full"){
+      if(supersedes(h.acrFullOverride)) clear.acrFullOverride = "";
+      if(supersedes(h.acrDocOverride)) clear.acrDocOverride = "";
+    } else if(l.acrKind==="doc" && supersedes(h.acrDocOverride)){
+      clear.acrDocOverride = "";
+    }
+  }
+  if(Object.keys(clear).length) await writeDocRaw("hospitals", Object.assign({}, h, clear));
 }
 
 // 병원의 예정 항목(PM + ACR)을 하나의 목록으로
@@ -2353,6 +2383,7 @@ function openLogForm(id, preset){
     local.set("lastHid", obj.hospitalId);
     if(obj.engineer){ engineer = obj.engineer; local.set("engineer", engineer); }
     const saved = await saveDoc("logs", obj);
+    await clearStaleOverrides(saved);
     const canPhoto = PHOTO_TYPES.includes(saved.type);
     if(!canPhoto && pending.length) toast("사진은 정기점검·고장수리·Cold Head에만 저장됩니다");
     // 삭제된 기존 사진
