@@ -1092,12 +1092,19 @@ async function saveDoc(coll, obj){
   if(!canEdit() && !loggerCreate){ toast("이 계정은 데이터를 수정할 수 없습니다"); return obj; }
   return writeDocRaw(coll, obj);
 }
-async function deleteDoc(coll, id){
-  if(!canEdit()){ toast("보기 전용 계정입니다 — 데이터를 수정할 수 없습니다"); return; }
+// deleteDoc의 권한 검사 없는 저수준 버전 — writeDocRaw와 같은 이유로 필요
+// (이미 허용된 동작의 부수효과로 다른 문서를 지워야 할 때, 예: 일정을 보고 일지를
+// 작성하면 그 일정을 자동으로 지움 — logger도 일지 작성은 되지만 일정 삭제는
+// 원래 admin 전용이라 deleteDoc()을 그대로 쓰면 막힌다).
+async function deleteDocRaw(coll, id){
   store[coll] = store[coll].filter(x=>x.id!==id);
   render();
   if(!db) return;
   try { await db.collection(coll).doc(id).delete(); } catch(e){ toast("삭제 실패: "+(e.message||e.code)); }
+}
+async function deleteDoc(coll, id){
+  if(!canEdit()){ toast("보기 전용 계정입니다 — 데이터를 수정할 수 없습니다"); return; }
+  return deleteDocRaw(coll, id);
 }
 
 /* ---- 작업일지 휴지통 (soft delete, 30일 보관 후 자동 완전삭제) ---- */
@@ -1915,6 +1922,8 @@ function openLogForm(id, preset){
     engineer: engineer,
     description: p.note || "",
   };
+  // 등록한 일정에서 "일지 작성"으로 넘어온 경우 — 저장되면 그 일정은 처리된 것이므로 자동 삭제
+  const fromScheduleId = (!editing && p.scheduleId) || null;
   const hospOpts = store.hospitals.slice().sort(koSort)
     .map(h=>`<option value="${h.id}" ${l.hospitalId===h.id?"selected":""}>${esc(h.name)}</option>`).join("");
 
@@ -2380,6 +2389,7 @@ function openLogForm(id, preset){
     if(obj.engineer){ engineer = obj.engineer; local.set("engineer", engineer); }
     const saved = await saveDoc("logs", obj);
     await clearStaleOverrides(saved);
+    if(fromScheduleId) await deleteDocRaw("schedule", fromScheduleId);
     const canPhoto = PHOTO_TYPES.includes(saved.type);
     if(!canPhoto && pending.length) toast("사진은 정기점검·고장수리·Cold Head에만 저장됩니다");
     // 삭제된 기존 사진
@@ -2593,7 +2603,7 @@ function openDay(dateStr){
       ${sched.length ? sched.map(s=>{
         const t = scheduleTypeInfo(s.type);
         return `<div class="mini"><span class="mtext" data-action="edit-schedule" data-id="${s.id}" style="cursor:pointer"><span class="chip ${t[2]}">${esc(t[1])}</span> ${esc(s.hospitalName)}${s.note?` — ${esc(s.note)}`:""}</span>
-          ${canLog() ? `<button type="button" class="btn sm primary" data-action="new-log" data-hid="${s.hospitalId}" data-date="${s.date}" data-type="${s.type}" data-note="${esc(s.note||"")}">일지 작성</button>` : ""}
+          ${canLog() ? `<button type="button" class="btn sm primary" data-action="new-log" data-hid="${s.hospitalId}" data-date="${s.date}" data-type="${s.type}" data-note="${esc(s.note||"")}" data-schedule-id="${s.id}">일지 작성</button>` : ""}
           <button type="button" class="prepx" data-action="del-schedule" data-id="${s.id}" data-date="${dateStr}" aria-label="삭제">×</button></div>`;
       }).join("") : `<div class="empty" style="padding:10px 0">등록된 일정이 없습니다.</div>`}
       ${sched.length && canEdit() ? `<div class="hint">일정을 눌러 수정할 수 있습니다.</div>` : ""}
@@ -2629,7 +2639,7 @@ function openScheduleEdit(id){
       <div class="field"><label>메모</label><input name="note" value="${esc(s.note||"")}" placeholder="예: 오전 방문 예정"></div>
       <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
         <button type="submit" class="btn primary" style="flex:1">저장</button>
-        ${canLog() ? `<button type="button" class="btn" data-action="new-log" data-hid="${s.hospitalId}" data-date="${s.date}" data-type="${s.type}" data-note="${esc(s.note||"")}">작업일지 작성</button>` : ""}
+        ${canLog() ? `<button type="button" class="btn" data-action="new-log" data-hid="${s.hospitalId}" data-date="${s.date}" data-type="${s.type}" data-note="${esc(s.note||"")}" data-schedule-id="${s.id}">작업일지 작성</button>` : ""}
         <button type="button" class="btn danger" data-action="del-schedule" data-id="${s.id}" data-date="${backDate}">삭제</button>
       </div>
     </form>
@@ -2758,7 +2768,7 @@ document.addEventListener("click", e=>{
   if(act==="close-panel") return closePanel();
   if(act==="settings") return openSettings();
   if(act==="logout"){ closePanel(); logout(); return; }
-  if(act==="new-log") return openLogForm(null, { hospitalId:a.dataset.hid, date:a.dataset.date, type:a.dataset.type, note:a.dataset.note });
+  if(act==="new-log") return openLogForm(null, { hospitalId:a.dataset.hid, date:a.dataset.date, type:a.dataset.type, note:a.dataset.note, scheduleId:a.dataset.scheduleId });
   if(act==="open-log") return openLogDetail(id);
   if(act==="edit-log"){ closePanelSoft(); return openLogForm(id); }
   if(act==="delete-log"){
