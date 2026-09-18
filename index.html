@@ -362,8 +362,8 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
 .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
 .calweekdays{margin-bottom:4px}
 .calwd{text-align:center;font-size:11px;color:var(--ink-3);font-weight:600;padding:2px 0}
-.calcell{height:68px;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:2px;
-  border:1px solid transparent;border-radius:8px;background:var(--surface-2);cursor:pointer;padding:3px 3px 4px;color:inherit;text-align:left;overflow:hidden}
+.calcell{min-height:68px;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:2px;
+  border:1px solid transparent;border-radius:8px;background:var(--surface-2);cursor:pointer;padding:3px 3px 4px;color:inherit;text-align:left}
 .calcell.empty{background:transparent;border:0;cursor:default}
 .calcell:hover:not(.empty){border-color:var(--accent)}
 .calcell.today{background:var(--accent-soft);border-color:var(--accent-line);border-width:2px}
@@ -375,7 +375,6 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
 .caltag.cal-acr{background:var(--acr-soft);color:var(--acr)}
 .caltag.cal-sched{background:var(--accent-soft);color:var(--accent)}
 .caltag.cal-log{background:var(--ok-soft);color:var(--ok)}
-.calmore{font-size:9px;color:var(--ink-3);padding-left:3px}
 .caldot{width:5px;height:5px;border-radius:999px;display:inline-block;background:var(--ink-3)}
 .caldot.cal-pm{background:var(--warn)}
 .caldot.cal-acr{background:var(--acr)}
@@ -1280,7 +1279,6 @@ function calendarHtml(){
   const pad2 = n => String(n).padStart(2,"0");
   let cells = "";
   for(let i=0;i<startWeekday;i++) cells += `<div class="calcell empty"></div>`;
-  const MAXTAGS = 2;
   for(let d=1; d<=daysInMonth; d++){
     const ds = `${y}-${pad2(m)}-${pad2(d)}`;
     const sched = scheduleForDate(ds);
@@ -1291,10 +1289,7 @@ function calendarHtml(){
       ...due.map(x=>({name:(x.kind==="PM"?"PM·":"ACR·")+x.hname, cls: x.kind==="PM"?"cal-pm":"cal-acr"})),
       ...sched.map(s=>({name:(s.hospitalName||"—")+" (예정)", cls:"cal-sched"})),
     ];
-    const shown = items.slice(0,MAXTAGS);
-    const extra = items.length - shown.length;
-    const tags = shown.map(it=>`<span class="caltag ${it.cls}">${esc(it.name)}</span>`).join("")
-      + (extra>0 ? `<span class="calmore">+${extra}건 더</span>` : "");
+    const tags = items.map(it=>`<span class="caltag ${it.cls}">${esc(it.name)}</span>`).join("");
     cells += `<button type="button" class="calcell${ds===today?" today":""}" data-action="open-day" data-date="${ds}">
       <span class="calnum">${d}</span><div class="caltags">${tags}</div></button>`;
   }
