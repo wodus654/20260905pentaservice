@@ -527,6 +527,11 @@ const PM_FORM = [
       {v:"done", l:"시행",     t:"ok"},
       {v:"skip", l:"미시행",   t:"muted"},
       {v:"cant", l:"시행불가", t:"warn"},
+    ], fields:[
+      {label:"주파수", type:"text", suffix:"Hz"},
+      {label:"X", type:"text"},
+      {label:"Y", type:"text"},
+      {label:"Z", type:"text"},
     ] }],
   ]],
   ["Computer", [
@@ -1797,7 +1802,7 @@ function logDetailBodyHtml(l, h, t, s, dur, forPrint){
       <div class="kv"><span class="kk">병원</span><span class="vv">${(h && !forPrint)?`<button type="button" class="linklike" data-go="hospital?id=${h.id}">${esc(h.name)}</button>`:esc(h?h.name:l.hospitalName||"—")}</span></div>
       <div class="kv"><span class="kk">장비</span><span class="vv">${esc(l.systemModel||"—")}</span></div>
       <div class="kv"><span class="kk">담당 엔지니어</span><span class="vv">${esc(l.engineer||"—")}</span></div>
-      <div class="kv"><span class="kk">소요 시간</span><span class="vv tnum">${dur!=null?dur+"분":"—"}</span></div>
+      <div class="kv"><span class="kk">소요 시간</span><span class="vv tnum">${(l.workStart&&l.workEnd)?`${esc(l.workStart)} ~ ${esc(l.workEnd)}${l.workEnd<l.workStart?" (다음날)":""}${dur!=null?` (${dur}분)`:""}`:(dur!=null?dur+"분":"—")}</span></div>
       ${l.contractType?`<div class="kv"><span class="kk">계약 구분</span><span class="vv">${esc(l.contractType)}</span></div>`:""}
       ${l.coldheadPos?`<div class="kv"><span class="kk">Cold Head</span><span class="vv">${esc(l.coldheadPos)}</span></div>`:""}
       ${l.coldheadSerial?`<div class="kv"><span class="kk">Serial Number</span><span class="vv mono">${esc(l.coldheadSerial)}</span></div>`:""}
