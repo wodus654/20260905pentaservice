@@ -198,12 +198,18 @@ a{color:var(--accent)}
 .section-t{display:flex;align-items:center;justify-content:space-between;margin:22px 2px 9px}
 .section-t h2{font-size:14px;font-weight:600;letter-spacing:.01em;color:var(--ink-2);text-transform:uppercase}
 .rows{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
-.row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--border);background:none;border-left:0;border-right:0;border-top:0;text-align:left;width:100%;color:inherit}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--border);background:none;border-left:3px solid transparent;border-right:0;border-top:0;text-align:left;width:100%;color:inherit}
 .row:last-child{border-bottom:0}
 .row:hover{background:var(--surface-2)}
+.row.rt-pm{border-left-color:var(--pm)}
+.row.rt-repair{border-left-color:var(--crit)}
+.row.rt-coldhead{border-left-color:var(--ch)}
+.row.rt-acr{border-left-color:var(--acr)}
+.row.rt-muted{border-left-color:var(--border-strong)}
 .row .rmain{flex:1;min-width:0}
-.row .rtitle{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.row .rmeta{font-size:12.5px;color:var(--ink-2);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.row .rhosp{font-size:12px;font-weight:700;color:var(--accent);letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .rtitle{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.row .rmeta{font-size:12.5px;color:var(--ink-2);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .row .rright{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
 .row .rdate{font-size:12px;color:var(--ink-3)}
 .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
@@ -1433,12 +1439,12 @@ function logRow(l){
   const t = TYPES[l.type]||{label:l.type,cls:"muted"};
   const s = STATUS[l.status]||null;
   const h = hospById(l.hospitalId);
-  return `<button class="row" data-action="open-log" data-id="${l.id}">
+  return `<button class="row rt-${t.cls}" data-action="open-log" data-id="${l.id}">
     <div class="rmain">
+      <div class="rhosp">${esc(h?h.name:l.hospitalName||"—")}</div>
       <div class="rtitle">${esc(l.title || typeLabel(l))}</div>
       <div class="rmeta">
         <span class="chip ${t.cls}">${esc(typeLabel(l))}</span>
-        <span>${esc(h?h.name:l.hospitalName||"—")}</span>
         ${l.systemModel?`<span class="mono">${esc(l.systemModel)}</span>`:""}
         ${(()=>{ const n=photosForLog(l.id).length; return n?`<span title="사진 ${n}장">📷 ${n}</span>`:""; })()}
         ${(()=>{ const f=(l.pm||[]).filter(pmBad).length; return f?`<span class="chip revisit">PM 이상 ${f}</span>`:""; })()}
