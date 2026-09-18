@@ -543,7 +543,7 @@ const PM_FORM = [
     ["Check Magnet LHe Level", "Safety", { fields:[{label:"LHe Level", type:"text", suffix:"%"}], noCheck:true }],
     ["Check Magnet Pressure", "Safety", { noCheck:true, fields:[
       { label:"Magnet Pressure", type:"text", suffix:"psi" },
-      { label:"Shield Cooler", type:"range", suffix:"MPa", options:["2.0","2.1","2.2","2.3","2.4","2.5","2.6","2.7","2.8","2.9"] },
+      { label:"Shield Cooler", type:"range", suffix:"MPa" },
       { label:"He 보충 시행", type:"check" },
     ] }],
   ]],
@@ -2286,9 +2286,9 @@ function openLogForm(id, preset){
       else if(f.type==="range"){
         const [lo,hi] = String(f.value||"").split("~");
         ctl = `<span class="pmrange">
-          <select data-pmr="${i}.${fi}.0"><option value=""></option>${(f.options||[]).map(o=>pmOpt(o,lo)).join("")}</select>
+          <input type="text" data-pmr="${i}.${fi}.0" value="${esc(lo||"")}" placeholder="값">
           <span class="pmtilde">~</span>
-          <select data-pmr="${i}.${fi}.1"><option value=""></option>${(f.options||[]).map(o=>pmOpt(o,hi)).join("")}</select></span>`;
+          <input type="text" data-pmr="${i}.${fi}.1" value="${esc(hi||"")}" placeholder="값"></span>`;
       } else
         ctl = `<input type="text" data-pmf="${i}.${fi}" value="${esc(f.value||"")}" placeholder="${esc(f.placeholder||"값")}">`;
       const suf = f.suffix ? `<span class="pmsuffix">${esc(f.suffix)}</span>` : "";
