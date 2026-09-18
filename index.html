@@ -1916,7 +1916,8 @@ ${body}
 (function(){
   function fitPage(){
     var px = document.body.scrollHeight;
-    var mm = px * 25.4 / 96 + 24;
+    var mm = px * 25.4 / 96 + 24 + 10;
+    if(mm >= 297) return;
     var st = document.createElement("style");
     st.textContent = "@page{ size:210mm " + mm.toFixed(1) + "mm; margin:12mm; }";
     document.head.appendChild(st);
