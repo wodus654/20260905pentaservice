@@ -9,58 +9,27 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
+/* 벤토 그리드(BENTO GRID) 스타일 — 차가운 회색 바탕 + 흰 플랫 카드(테두리만, 그림자 없음)
+   + 선명한 파랑 강조. 라이트 전용(다크 모드 없음). */
 :root{
-  --bg:#eef7fb; --surface:#ffffff; --surface-2:#e6f3fa; --raise:#ffffff;
-  --border:#d2e7f2; --border-strong:#aed2e5;
-  --ink:#0e2430; --ink-2:#4c6d7d; --ink-3:#7f9aa8;
-  --accent:#0098e0; --accent-ink:#ffffff; --accent-soft:#dcf1fb; --accent-line:#0098e0;
-  --ok:#2f7d54; --ok-soft:#dcefe3;
-  --warn:#a76a1a; --warn-soft:#f6e9d5;
-  --crit:#b23b3b; --crit-soft:#f4e0df;
-  --pm:#2f5fa7; --pm-soft:#dfe8f5;
-  --acr:#6a4a9c; --acr-soft:#e7dff3;
-  --ch:#0f7b8c; --ch-soft:#d5eef1;
+  color-scheme:light;
+  --bg:#f0f2f7; --surface:#ffffff; --surface-2:#f4f6fa; --raise:#ffffff;
+  --border:#dfe3eb; --border-strong:#c6cddb;
+  --ink:#182033; --ink-2:#5b6579; --ink-3:#8d96a8;
+  --accent:#1660ee; --accent-ink:#ffffff; --accent-soft:#e8efff; --accent-line:#1660ee;
+  --ok:#0f7a4d; --ok-soft:#dcf2e6;
+  --warn:#9a6512; --warn-soft:#fbeed3;
+  --crit:#c8342d; --crit-soft:#fbe4e2;
+  --pm:#1660ee; --pm-soft:#e8efff;
+  --acr:#6a4a9c; --acr-soft:#ece4f9;
+  --ch:#0c7c8e; --ch-soft:#d6f0f4;
   --sched-bg:#c0392b; --sched-ink:#ffffff;
   --acrsched-bg:#6a4a9c; --acrsched-ink:#ffffff;
-  --done-bg:#1c1c1c; --done-ink:#f2f2f2;
-  --shadow:0 1px 2px rgba(14,36,48,.06), 0 4px 16px rgba(14,36,48,.05);
-  --radius:10px;
+  --done-bg:#182033; --done-ink:#ffffff;
+  --shadow:none;
+  --radius:14px;
   --sans:"IBM Plex Sans KR", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono:"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
-}
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    --bg:#0a1620; --surface:#0f2330; --surface-2:#15303f; --raise:#193849;
-    --border:#234459; --border-strong:#2f5a72;
-    --ink:#eaf6fc; --ink-2:#a7c7d6; --ink-3:#7096a8;
-    --accent:#33c1ff; --accent-ink:#02222f; --accent-soft:#123245; --accent-line:#33c1ff;
-    --ok:#5cbd85; --ok-soft:#17361f;
-    --warn:#d69b52; --warn-soft:#3a2e1b;
-    --crit:#e37e7e; --crit-soft:#3d2222;
-    --pm:#7aa2e0; --pm-soft:#1f3350;
-    --acr:#ab90d8; --acr-soft:#2c2545;
-    --ch:#4bb8c8; --ch-soft:#123840;
-    --sched-bg:#c0392b; --sched-ink:#ffffff;
-  --acrsched-bg:#6a4a9c; --acrsched-ink:#ffffff;
-    --done-bg:#1c1c1c; --done-ink:#f2f2f2;
-    --shadow:0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.28);
-  }
-}
-:root[data-theme="dark"]{
-  --bg:#0a1620; --surface:#0f2330; --surface-2:#15303f; --raise:#193849;
-  --border:#234459; --border-strong:#2f5a72;
-  --ink:#eaf6fc; --ink-2:#a7c7d6; --ink-3:#7096a8;
-  --accent:#33c1ff; --accent-ink:#02222f; --accent-soft:#123245; --accent-line:#33c1ff;
-  --ok:#5cbd85; --ok-soft:#17361f;
-  --warn:#d69b52; --warn-soft:#3a2e1b;
-  --crit:#e37e7e; --crit-soft:#3d2222;
-  --pm:#7aa2e0; --pm-soft:#1f3350;
-  --acr:#ab90d8; --acr-soft:#2c2545;
-  --ch:#4bb8c8; --ch-soft:#123840;
-  --sched-bg:#c0392b; --sched-ink:#ffffff;
-  --acrsched-bg:#6a4a9c; --acrsched-ink:#ffffff;
-  --done-bg:#1c1c1c; --done-ink:#f2f2f2;
-  --shadow:0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.28);
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
@@ -102,8 +71,8 @@ a{color:var(--accent)}
 .loginsubmit{width:100%;padding:11px;border:0;border-radius:8px;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:15px}
 .topbar .spacer{flex:1}
 .viewhead{padding:18px 16px 6px}
-.viewhead h1{font-size:20px;font-weight:600;letter-spacing:-.02em;text-wrap:balance}
-.viewhead .sub{color:var(--ink-2);font-size:13px;margin-top:2px}
+.viewhead h1{font-size:23px;font-weight:800;letter-spacing:-.035em;text-wrap:balance}
+.viewhead .sub{color:var(--ink-2);font-size:13px;margin-top:3px;font-weight:500}
 .wrap{padding:12px 16px 40px;max-width:1000px;margin:0 auto}
 
 /* bottom nav (mobile) */
@@ -117,7 +86,7 @@ a{color:var(--accent)}
 /* ---------- primitives ---------- */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
 .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border-strong);background:var(--surface);
-  color:var(--ink);padding:8px 13px;border-radius:8px;font-weight:500;white-space:nowrap}
+  color:var(--ink);padding:8px 13px;border-radius:10px;font-weight:600;white-space:nowrap}
 .btn:hover{border-color:var(--ink-3)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn.primary:hover{filter:brightness(1.06)}
@@ -143,15 +112,15 @@ a{color:var(--accent)}
 
 .field{display:flex;flex-direction:column;gap:5px}
 .field label{font-size:12px;font-weight:600;color:var(--ink-2);letter-spacing:.02em;text-transform:uppercase}
-.field input,.field select,.field textarea{width:100%;padding:9px 11px;border:1px solid var(--border-strong);
-  border-radius:8px;background:var(--surface);color:var(--ink)}
+.field input,.field select,.field textarea{width:100%;padding:10px 12px;border:1px solid var(--border-strong);
+  border-radius:10px;background:var(--surface);color:var(--ink)}
 .field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
 .field textarea{resize:none;min-height:76px;line-height:1.55;overflow:hidden}
 .field .hint{font-size:12px;color:var(--ink-3);text-transform:none;font-weight:400}
 .grid2{display:grid;grid-template-columns:1fr;gap:14px}
 @media(min-width:560px){.grid2{grid-template-columns:1fr 1fr}}
-.seg{display:flex;border:1px solid var(--border-strong);border-radius:8px;overflow:hidden}
-.seg button{flex:1;background:var(--surface);border:0;padding:9px 8px;font-weight:600;color:var(--ink-2);border-right:1px solid var(--border)}
+.seg{display:flex;border:1px solid var(--border-strong);border-radius:10px;overflow:hidden}
+.seg button{flex:1;background:var(--surface);border:0;padding:9px 8px;font-weight:700;color:var(--ink-2);border-right:1px solid var(--border)}
 .seg button:last-child{border-right:0}
 .seg button.on{background:var(--accent);color:var(--accent-ink)}
 .seg.wrap{flex-wrap:wrap}
@@ -187,19 +156,29 @@ a{color:var(--accent)}
 .empty{text-align:center;color:var(--ink-2);padding:40px 16px}
 .empty svg{opacity:.4;margin-bottom:10px}
 
-/* stat tiles */
+/* stat tiles — 벤토 그리드: 모듈 크기를 달리해 우선순위를 만든다(큰 히어로 / 작은 둘 / 넓은 하나) */
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
-@media(min-width:640px){.stats{grid-template-columns:repeat(4,1fr)}}
-.stat{padding:13px 14px}
-.stat .k{font-size:12px;color:var(--ink-2);font-weight:600;letter-spacing:.02em}
-.stat .v{font-size:26px;font-weight:600;letter-spacing:-.02em;margin-top:3px}
-.stat .v small{font-size:13px;color:var(--ink-3);font-weight:500}
+.stats .stat:nth-child(1),.stats .stat:nth-child(4){grid-column:span 2}
+@media(min-width:640px){
+  .stats{grid-template-columns:1.5fr 1fr 1fr 1fr}
+  .stats .stat:nth-child(1),.stats .stat:nth-child(4){grid-column:auto}
+}
+.stat{padding:14px 15px;display:flex;flex-direction:column;justify-content:center}
+.stat .k{font-size:12px;color:var(--ink-2);font-weight:700;letter-spacing:.01em}
+.stat .v{font-size:28px;font-weight:800;letter-spacing:-.035em;margin-top:4px}
+.stat .v small{font-size:13px;color:var(--ink-3);font-weight:600}
 .stat.alert .v{color:var(--crit)}
-.stat[data-go]:hover,.stat[data-scroll]:hover{border-color:var(--accent-line);background:var(--surface-2)}
+.stat[data-go]:hover,.stat[data-scroll]:hover{border-color:var(--accent-line)}
+/* 첫 타일 = 강조색으로 꽉 채운 히어로 모듈 */
+.stats .stat:nth-child(1){background:var(--accent);border-color:var(--accent)}
+.stats .stat:nth-child(1) .k{color:rgba(255,255,255,.8)}
+.stats .stat:nth-child(1) .v{color:#fff;font-size:34px}
+.stats .stat:nth-child(1) .v small{color:rgba(255,255,255,.75)}
+.stats .stat:nth-child(1):hover{filter:brightness(1.05)}
 
 /* list rows */
 .section-t{display:flex;align-items:center;justify-content:space-between;margin:22px 2px 9px}
-.section-t h2{font-size:14px;font-weight:600;letter-spacing:.01em;color:var(--ink-2);text-transform:uppercase}
+.section-t h2{font-size:15px;font-weight:800;letter-spacing:-.02em;color:var(--ink);text-transform:none}
 .rows{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
 .row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--border);background:none;border-left:3px solid transparent;border-right:0;border-top:0;text-align:left;width:100%;color:inherit}
 .row:last-child{border-bottom:0}
@@ -211,7 +190,7 @@ a{color:var(--accent)}
 .row.rt-muted{border-left-color:var(--border-strong)}
 .row .rmain{flex:1;min-width:0}
 .row .rhosp{font-size:12px;font-weight:700;color:var(--accent);letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.row .rtitle{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.row .rtitle{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
 .row .rmeta{font-size:12.5px;color:var(--ink-2);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .row .rright{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
 .row .rdate{font-size:12px;color:var(--ink-3)}
@@ -370,20 +349,28 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
 .calbody.cal-enter-next{animation:calInNext .2s ease-out}
 .calbody.cal-enter-prev{animation:calInPrev .2s ease-out}
 @media (prefers-reduced-motion:reduce){.calbody.cal-enter-next,.calbody.cal-enter-prev{animation:none}}
-.calhead{display:flex;align-items:center;gap:8px;margin-bottom:12px}
-.calhead b{font-size:14px;letter-spacing:-.01em}
+/* 달력 헤더 = 강조색으로 꽉 채운 히어로 바(벤토의 큰 모듈), 날짜칸은 흰색으로 남겨 태그 색 구분을 지킨다 */
+.calhead{display:flex;align-items:center;gap:8px;background:var(--accent);color:var(--accent-ink);padding:12px 14px}
+.calhead b{font-size:15px;font-weight:800;letter-spacing:-.02em;color:#fff}
+.calhead .btn{color:#fff;border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.12)}
+.calhead .btn:hover{background:rgba(255,255,255,.22);border-color:rgba(255,255,255,.7)}
+.calhead .btn.ghost{border-color:transparent;background:transparent;color:rgba(255,255,255,.92)}
+.calhead .btn.ghost:hover{background:rgba(255,255,255,.18);color:#fff}
+.calinner{padding:14px;background:var(--bg)}
 .calmonthpick{position:relative;display:inline-flex;cursor:pointer}
 .calmonthpick input{position:absolute;inset:0;opacity:0;width:100%;height:100%;border:0;cursor:pointer}
 .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
 .calweekdays{margin-bottom:4px}
 .calwd{text-align:center;font-size:11px;color:var(--ink-3);font-weight:600;padding:2px 0}
 .calcell{min-height:68px;min-width:0;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:2px;
-  border:1px solid transparent;border-radius:8px;background:var(--surface-2);cursor:pointer;padding:3px 3px 4px;color:inherit;text-align:left}
+  border:1px solid var(--border);border-radius:10px;background:var(--surface);cursor:pointer;padding:4px 4px 5px;color:inherit;text-align:left}
 .calcell.empty{background:transparent;border:0;cursor:default}
 .calcell:hover:not(.empty){border-color:var(--accent)}
-.calcell.today{background:var(--accent-soft);border-color:var(--accent-line);border-width:2px}
-.calcell.today .calnum{color:var(--accent);font-weight:700}
-.calnum{font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--ink-2);padding-left:1px}
+.calcell.today{background:var(--accent-soft);border-color:var(--accent-line)}
+/* 오늘 = 강조색을 반전시킨 칩(벤토 레퍼런스의 today 처리) */
+.calcell.today .calnum{background:var(--accent);color:#fff;font-weight:800;border-radius:999px;padding:0;
+  min-width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;align-self:flex-start}
+.calnum{font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--ink-2);padding-left:1px;font-weight:600}
 .calcell.holiday .calnum{color:var(--crit);font-weight:700}
 .calholname{font-size:8.5px;line-height:1.25;color:var(--crit);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:1px}
 .caltags{display:flex;flex-direction:column;gap:1px;min-width:0}
@@ -1352,18 +1339,20 @@ function calendarHtml(){
   for(let i=0;i<trail;i++) cells += `<div class="calcell empty"></div>`;
   const enterCls = calAnimDir>0 ? " cal-enter-next" : calAnimDir<0 ? " cal-enter-prev" : "";
   calAnimDir = 0;
-  return `<div class="card calcard" style="padding:14px" id="cal-swipe">
+  return `<div class="card calcard" id="cal-swipe">
     <div class="calhead">
       <button type="button" class="btn ghost sm" data-action="cal-prev" aria-label="이전 달">‹</button>
       <label class="calmonthpick"><b>${y}년 ${m}월</b><input type="month" data-cal-jump value="${calMonth}" aria-label="연월 선택"></label>
       <button type="button" class="btn ghost sm" data-action="cal-next" aria-label="다음 달">›</button>
       <button type="button" class="btn ghost sm" data-action="cal-today" style="margin-left:auto">오늘</button>
     </div>
-    <div class="calbody${enterCls}">
-      <div class="calgrid calweekdays">${["일","월","화","수","목","금","토"].map(w=>`<div class="calwd">${w}</div>`).join("")}</div>
-      <div class="calgrid">${cells}</div>
+    <div class="calinner">
+      <div class="calbody${enterCls}">
+        <div class="calgrid calweekdays">${["일","월","화","수","목","금","토"].map(w=>`<div class="calwd">${w}</div>`).join("")}</div>
+        <div class="calgrid">${cells}</div>
+      </div>
+      <div class="calkey"><span><span class="caldot cal-log"></span> 작성된 일지</span><span><span class="caldot cal-pm"></span> PM 예정</span><span><span class="caldot cal-acr"></span> ACR 예정</span><span><span class="caldot cal-sched"></span> 등록한 일정</span></div>
     </div>
-    <div class="calkey"><span><span class="caldot cal-log"></span> 작성된 일지</span><span><span class="caldot cal-pm"></span> PM 예정</span><span><span class="caldot cal-acr"></span> ACR 예정</span><span><span class="caldot cal-sched"></span> 등록한 일정</span></div>
   </div>`;
 }
 function viewDash(){
