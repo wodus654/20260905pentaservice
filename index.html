@@ -203,7 +203,9 @@ a{color:var(--accent)}
 .filters select{padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);color:var(--ink)}
 
 /* detail */
-.panel{position:fixed;inset:0;z-index:50;background:var(--bg);overflow-y:auto;overscroll-behavior:contain}
+/* 전체화면 패널은 팝업(.daypop/#logpop, z-index 60)보다 위에 와야 한다 —
+   팝업에서 "수정"·"일지 작성"으로 넘어갈 때 패널이 팝업 뒤에 깔려 가려졌었음 */
+.panel{position:fixed;inset:0;z-index:70;background:var(--bg);overflow-y:auto;overscroll-behavior:contain}
 .panel .phead{position:sticky;top:0;background:var(--surface);border-bottom:1px solid var(--border);
   display:flex;align-items:center;gap:10px;padding:12px 14px;z-index:2}
 .panel .phead h2{font-size:16px;font-weight:600;flex:1;letter-spacing:-.01em}
@@ -1732,6 +1734,21 @@ let panelOverlayActive = false;
 function unlockScrollIfFree(){
   if(!panelRoot().innerHTML && !$("#daypop") && !$("#logpop")) document.body.style.overflow = "";
 }
+// 팝업에서 전체화면 화면(수정 폼 등)으로 넘어갈 때: 열려 있는 팝업을 히스토리 항목까지
+// 전부 반납하고 닫은 뒤에 fn()을 실행한다. history.go(-n)은 popstate가 비동기로 오므로
+// 그걸 기다렸다 열어야 패널이 뒤이어 push하는 항목과 순서가 꼬이지 않는다.
+function closePopupsThen(fn){
+  let n = 0;
+  while(overlayStack.length){ const f = overlayStack.pop(); if(f) f(); n++; }
+  if(!n){ fn(); return; }
+  suppressNextPop = true;
+  let done = false;
+  const run = ()=>{ if(done) return; done = true; window.removeEventListener("popstate", onPop); fn(); };
+  const onPop = ()=> setTimeout(run, 0);
+  window.addEventListener("popstate", onPop);
+  setTimeout(run, 250);        // popstate가 오지 않는 경우 대비
+  history.go(-n);
+}
 function closePanel(){
   if(panelOverlayActive){
     panelOverlayActive = false;
@@ -3123,13 +3140,8 @@ document.addEventListener("click", e=>{
   if(act==="close-logpop") return closeLogPop();
   if(act==="print-log") return printLogDoc(id);
   if(act==="edit-log"){
-    if($("#logpop")){
-      // 팝업은 히스토리 항목까지 정상 반납하고 닫아야 한다. 그냥 DOM만 지우면 스택에 남은 항목이
-      // 아래쪽 달력 팝업보다 위에 쌓여서, 나중에 달력 팝업을 닫으려 할 때 그 항목이 대신 소비된다.
-      closeLogPop();
-      setTimeout(()=>openLogForm(id), 0);   // popstate가 정리된 뒤에 패널을 연다
-      return;
-    }
+    // 수정으로 넘어갈 땐 일지 팝업뿐 아니라 그 아래 달력 팝업까지 전부 닫고 수정 화면만 남긴다
+    if($("#logpop") || $("#daypop")) return closePopupsThen(()=>openLogForm(id));
     closePanelSoft();
     return openLogForm(id); }
   if(act==="delete-log"){
