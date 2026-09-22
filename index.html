@@ -522,7 +522,7 @@ const TYPES = {
 };
 // Call은 방문이 아니라 전화 응대 기록 — 제목·Call 내용·다음 방문 준비물만 받는다
 const CALL_HIDDEN_TYPES = "PM REPAIR COLDHEAD ACR ETC"; // = CALL일 때 감출 항목들의 data-when
-const PHOTO_TYPES = ["PM","REPAIR","COLDHEAD","ETC"]; // 사진 업로드 가능한 작업 구분
+const PHOTO_TYPES = ["PM","REPAIR","COLDHEAD","CALL","ETC"]; // 사진 업로드 가능한 작업 구분
 const ACR_KINDS = {
   doc:     {label:"ACR 서류", short:"서류", months:12},
   full:    {label:"ACR 정밀", short:"정밀", months:36},
@@ -2244,7 +2244,7 @@ function openLogForm(id, preset){
     </div>
     <div class="field" data-when="REPAIR COLDHEAD" style="max-width:50%"><label>헬륨 레벨 (%)</label><input type="number" name="heLevel" min="0" max="100" step="0.01" value="${esc(l.heLevel||"")}" placeholder="예: 62.37"></div>
 
-    <div class="field" data-when="PM REPAIR COLDHEAD ETC"><label>사진</label>
+    <div class="field" data-when="PM REPAIR COLDHEAD CALL ETC"><label>사진</label>
       <label class="photoadd">＋ 사진 추가<input type="file" accept="image/*" multiple data-photoinput></label>
       <div class="thumbs" id="photothumbs"></div>
       <span class="hint">촬영·선택하면 자동으로 축소·압축되어 저장됩니다 (장당 약 150KB).</span>
