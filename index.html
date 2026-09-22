@@ -104,6 +104,7 @@ a{color:var(--accent)}
 .chip.repair{background:var(--crit-soft);color:var(--crit)}
 .chip.coldhead{background:var(--ch-soft);color:var(--ch)}
 .chip.acr{background:var(--acr-soft);color:var(--acr)}
+.chip.call{background:var(--warn-soft);color:var(--warn)}
 .chip.done{background:var(--ok-soft);color:var(--ok)}
 .chip.progress{background:var(--warn-soft);color:var(--warn)}
 .chip.revisit{background:var(--crit-soft);color:var(--crit)}
@@ -189,6 +190,7 @@ a{color:var(--accent)}
 .row.rt-repair{border-left-color:var(--crit)}
 .row.rt-coldhead{border-left-color:var(--ch)}
 .row.rt-acr{border-left-color:var(--acr)}
+.row.rt-call{border-left-color:var(--warn)}
 .row.rt-muted{border-left-color:var(--border-strong)}
 .row .rmain{flex:1;min-width:0}
 .row .rhosp{font-size:12px;font-weight:700;color:var(--accent);letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -515,8 +517,11 @@ const TYPES = {
   REPAIR:   {label:"고장수리",     cls:"repair"},
   COLDHEAD: {label:"Cold Head",    cls:"coldhead"},
   ACR:      {label:"ACR",          cls:"acr"},
+  CALL:     {label:"Call",         cls:"call"},
   ETC:      {label:"기타",         cls:"muted"},
 };
+// Call은 방문이 아니라 전화 응대 기록 — 제목·Call 내용·다음 방문 준비물만 받는다
+const CALL_HIDDEN_TYPES = "PM REPAIR COLDHEAD ACR ETC"; // = CALL일 때 감출 항목들의 data-when
 const PHOTO_TYPES = ["PM","REPAIR","COLDHEAD","ETC"]; // 사진 업로드 가능한 작업 구분
 const ACR_KINDS = {
   doc:     {label:"ACR 서류", short:"서류", months:12},
@@ -1891,9 +1896,9 @@ function logDetailBodyHtml(l, h, t, s, dur, forPrint){
     <h3 style="text-transform:none;font-size:18px;color:var(--ink);letter-spacing:-.01em">${esc(l.title||typeLabel(l))}</h3>
     <div class="kvgrid">
       <div class="kv"><span class="kk">병원</span><span class="vv">${(h && !forPrint)?`<button type="button" class="linklike" data-go="hospital?id=${h.id}">${esc(h.name)}</button>`:esc(h?h.name:l.hospitalName||"—")}</span></div>
-      <div class="kv"><span class="kk">장비</span><span class="vv">${esc(l.systemModel||"—")}</span></div>
+      ${l.type!=="CALL" ? `<div class="kv"><span class="kk">장비</span><span class="vv">${esc(l.systemModel||"—")}</span></div>
       <div class="kv"><span class="kk">담당 엔지니어</span><span class="vv">${esc(l.engineer||"—")}</span></div>
-      <div class="kv"><span class="kk">소요 시간</span><span class="vv tnum">${(l.workStart&&l.workEnd)?`${esc(l.workStart)} ~ ${esc(l.workEnd)}${l.workEnd<l.workStart?" (다음날)":""}${dur!=null?` (${dur}분)`:""}`:(dur!=null?dur+"분":"—")}</span></div>
+      <div class="kv"><span class="kk">소요 시간</span><span class="vv tnum">${(l.workStart&&l.workEnd)?`${esc(l.workStart)} ~ ${esc(l.workEnd)}${l.workEnd<l.workStart?" (다음날)":""}${dur!=null?` (${dur}분)`:""}`:(dur!=null?dur+"분":"—")}</span></div>` : ""}
       ${l.contractType?`<div class="kv"><span class="kk">계약 구분</span><span class="vv">${esc(l.contractType)}</span></div>`:""}
       ${l.coldheadPos?`<div class="kv"><span class="kk">Cold Head</span><span class="vv">${esc(l.coldheadPos)}</span></div>`:""}
       ${l.coldheadSerial?`<div class="kv"><span class="kk">Serial Number</span><span class="vv mono">${esc(l.coldheadSerial)}</span></div>`:""}
@@ -1901,7 +1906,7 @@ function logDetailBodyHtml(l, h, t, s, dur, forPrint){
       ${l.heLevel?`<div class="kv"><span class="kk">헬륨 레벨</span><span class="vv mono">${esc(l.heLevel)}%</span></div>`:""}
     </div>
     ${l.symptom?kvBlock("증상 / 요청사항", l.symptom):""}
-    ${l.description?kvBlock("조치 내용 / 특이사항", l.description):""}
+    ${l.description?kvBlock(l.type==="CALL"?"Call 내용":"조치 내용 / 특이사항", l.description):""}
     ${l.parts?kvBlock("교체 부품", l.parts):""}
     ${l.followUp?kvBlock("후속 조치", l.followUp):""}
     ${l.type==="PM" && l.pm && l.pm.length ? renderPmDetail(l.pm) : ""}
@@ -1929,13 +1934,7 @@ function logDetailFullHtml(l){
     </div>` : `<div class="hint" style="text-align:center">이 계정은 일지 작성만 가능하며, 기존 일지는 수정·삭제할 수 없습니다.</div>`}
   `;
 }
-function openLogDetail(id){
-  const l = store.logs.find(x=>x.id===id);
-  if(!l) return;
-  openPanel(logDetailFullHtml(l));
-  setPanelTitle("작업일지 상세");
-}
-// 달력 팝업 안에서 일지를 누른 경우 — 전체화면으로 덮지 않고 팝업 위에 팝업으로 띄운다
+// 일지 상세는 팝업으로 본다. 달력 팝업에서 열면 그 위에 겹쳐 뜬다.
 let logPopId = null;
 function showLogPop(id){
   const l = store.logs.find(x=>x.id===id);
@@ -2217,7 +2216,7 @@ function openLogForm(id, preset){
       <div class="field"><label>작업일 *</label><input type="date" name="date" value="${esc(l.date)}" required></div>
     </div>
 
-    <div class="grid2">
+    <div class="grid2" data-when="${CALL_HIDDEN_TYPES}">
       <div class="field"><label>장비 (모델)</label><input list="sysmodels" name="systemModel" value="${esc(l.systemModel||"")}" placeholder="예: SIGNA HDxt 1.5T">
         <datalist id="sysmodels"></datalist></div>
       <div class="field"><label>담당 엔지니어</label><input name="engineer" value="${esc(l.engineer||"")}"></div>
@@ -2236,10 +2235,10 @@ function openLogForm(id, preset){
 
     <div class="field" data-when="REPAIR"><label>증상 / 요청사항</label><textarea name="symptom" placeholder="사용자 접수 내용, 에러코드, 발생 상황">${esc(l.symptom||"")}</textarea></div>
 
-    <div class="field"><label>조치 내용 / 특이사항</label><textarea name="description" placeholder="점검·수리 상세 / 측정값 / 결과 / 특이사항">${esc(l.description||"")}</textarea></div>
+    <div class="field"><label data-desc-label>조치 내용 / 특이사항</label><textarea name="description" placeholder="점검·수리 상세 / 측정값 / 결과 / 특이사항">${esc(l.description||"")}</textarea></div>
     <div class="field" data-when="PM REPAIR COLDHEAD ETC"><label>교체 부품</label><textarea name="parts" placeholder="부품번호 · 부품명 · 수량 (한 줄에 하나)" style="min-height:60px">${esc(l.parts||"")}</textarea></div>
 
-    <div class="grid2">
+    <div class="grid2" data-when="${CALL_HIDDEN_TYPES}">
       <div class="field"><label>작업 시작 (24시간)</label><input type="text" name="workStart" data-timefield value="${esc(l.workStart||"")}" inputmode="numeric" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]" placeholder="예: 1600 → 16:00" maxlength="5"></div>
       <div class="field"><label>작업 종료 (24시간)</label><input type="text" name="workEnd" data-timefield value="${esc(l.workEnd||"")}" inputmode="numeric" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]" placeholder="예: 1600 → 16:00" maxlength="5"></div>
     </div>
@@ -2256,7 +2255,7 @@ function openLogForm(id, preset){
       <div id="acrfullgrid"></div>
     </div>
 
-    <div class="field"><label>상태</label>
+    <div class="field" data-when="${CALL_HIDDEN_TYPES}"><label>상태</label>
       <div class="seg" data-seg="status">
         ${Object.entries(STATUS).map(([k,v])=>`<button type="button" data-v="${k}" class="${l.status===k?"on":""}">${v.label}</button>`).join("")}
       </div><input type="hidden" name="status" value="${esc(l.status)}"></div>
@@ -2482,6 +2481,11 @@ function openLogForm(id, preset){
     form.querySelectorAll("[data-when]").forEach(el=> el.style.display = el.dataset.when.split(" ").includes(type) ? "" : "none");
     form.querySelectorAll("[data-when-status]").forEach(el=> el.style.display = el.dataset.whenStatus.split(" ").includes(status) ? "" : "none");
     form.querySelectorAll("[data-when-acr]").forEach(el=> el.style.display = (type==="ACR" && el.dataset.whenAcr.split(" ").includes(acrKind)) ? "" : "none");
+    // Call은 방문 기록이 아니라 전화 내용이라 같은 칸의 이름만 바꿔 쓴다
+    const dl = form.querySelector("[data-desc-label]");
+    if(dl) dl.textContent = type==="CALL" ? "Call 내용" : "조치 내용 / 특이사항";
+    const dt = form.querySelector('textarea[name="description"]');
+    if(dt) dt.placeholder = type==="CALL" ? "전화 받은 내용 / 문의사항 / 안내한 내용" : "점검·수리 상세 / 측정값 / 결과 / 특이사항";
     // 숨겨져 있던 textarea가 다시 보이면(display:none 동안엔 scrollHeight가 0이라) 높이를 다시 계산
     autoGrowVisibleTextareas(form);
   }
@@ -2555,7 +2559,7 @@ function openLogForm(id, preset){
         const auto = v => (!form.title.value.trim() || autoTitles.includes(form.title.value.trim())) && (form.title.value = v);
         if(form.type.value==="PM") auto("Planned Maintenance");
         else if(form.type.value==="COLDHEAD" && form.coldheadPos.value) auto("Cold Head " + form.coldheadPos.value);
-        else if(["REPAIR","COLDHEAD","ACR","ETC"].includes(form.type.value)){
+        else if(["REPAIR","COLDHEAD","ACR","CALL","ETC"].includes(form.type.value)){
           if(autoTitles.includes(form.title.value.trim())) form.title.value = "";
         }
       }
@@ -2619,7 +2623,13 @@ function openLogForm(id, preset){
     if(obj.type!=="ACR") obj.acrKind = "";
     if(obj.type!=="PM") obj.contractType = "";
     if(obj.type!=="COLDHEAD"){ obj.coldheadPos = ""; obj.coldheadSerial = ""; obj.coldheadInDate = ""; }
-    obj.countsAsPm = (obj.type!=="PM") ? !!fd.get("countsAsPm") : false;
+    // Call은 숨겨둔 칸들이 폼에는 남아 있으므로(값까지 같이 저장되지 않도록) 여기서 비운다
+    if(obj.type==="CALL"){
+      obj.systemModel = ""; obj.engineer = ""; obj.symptom = ""; obj.parts = "";
+      obj.workStart = ""; obj.workEnd = ""; obj.heLevel = ""; obj.followUp = "";
+      obj.status = "done";
+    }
+    obj.countsAsPm = (obj.type!=="PM" && obj.type!=="CALL") ? !!fd.get("countsAsPm") : false;
     obj.hospitalName = hospById(obj.hospitalId)?.name || "";
     const tRe = /^([01]?\d|2[0-3]):[0-5]\d$/;
     if(tRe.test(obj.workStart) && tRe.test(obj.workEnd)) obj.durationMin = durationMin(obj.workStart,obj.workEnd);
@@ -3108,8 +3118,8 @@ document.addEventListener("click", e=>{
   if(act==="settings") return openSettings();
   if(act==="logout"){ closePanel(); logout(); return; }
   if(act==="new-log") return openLogForm(null, { hospitalId:a.dataset.hid, date:a.dataset.date, type:a.dataset.type, note:a.dataset.note, scheduleId:a.dataset.scheduleId });
-  // 달력 팝업 안에서 누른 일지는 전체화면 대신 팝업으로
-  if(act==="open-log") return $("#daypop") ? showLogPop(id) : openLogDetail(id);
+  // 일지 상세는 어디서 눌러도 팝업으로 본다(목록·달력 팝업·병원 상세 모두)
+  if(act==="open-log") return showLogPop(id);
   if(act==="close-logpop") return closeLogPop();
   if(act==="print-log") return printLogDoc(id);
   if(act==="edit-log"){
