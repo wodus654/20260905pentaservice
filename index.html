@@ -1723,6 +1723,10 @@ window.addEventListener("popstate", ()=>{
 /* ============ panels (forms + detail) ============ */
 const panelRoot = () => $("#panel-root");
 let panelOverlayActive = false;
+// 겹쳐 뜨는 오버레이(패널/달력 팝업/일지 팝업)가 하나라도 남아 있으면 배경 스크롤 잠금을 유지한다
+function unlockScrollIfFree(){
+  if(!panelRoot().innerHTML && !$("#daypop") && !$("#logpop")) document.body.style.overflow = "";
+}
 function closePanel(){
   if(panelOverlayActive){
     panelOverlayActive = false;
@@ -1730,7 +1734,7 @@ function closePanel(){
     suppressNextPop = true;
     history.back();
   }
-  panelRoot().innerHTML=""; document.body.style.overflow=""; render();
+  panelRoot().innerHTML=""; unlockScrollIfFree(); render();
 }
 function openPanel(html){
   panelRoot().innerHTML = `<div class="panel"><div class="phead">
@@ -1909,13 +1913,12 @@ function logDetailBodyHtml(l, h, t, s, dur, forPrint){
       <div class="thumbs" style="margin-top:6px">${ps.map(p=>`<div class="thumb"><img src="${p.dataUri}" data-lightbox="${p.id}" alt="현장 사진"></div>`).join("")}</div></div>` : ""; })() : ""}
   `;
 }
-function openLogDetail(id){
-  const l = store.logs.find(x=>x.id===id);
-  if(!l) return;
+// 전체화면 패널과 팝업이 같이 쓰는 일지 상세 본문
+function logDetailFullHtml(l){
   const h = hospById(l.hospitalId);
   const t = TYPES[l.type]||{label:l.type,cls:"muted"}; const s = STATUS[l.status];
   const dur = (l.workStart && l.workEnd) ? durationMin(l.workStart,l.workEnd) : (l.durationMin||null);
-  openPanel(`
+  return `
     <div class="card formcard">${logDetailBodyHtml(l,h,t,s,dur,false)}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button type="button" class="btn sm" data-action="print-log" data-id="${l.id}" style="flex:1">인쇄 / PDF 저장</button>
@@ -1924,8 +1927,46 @@ function openLogDetail(id){
       <button class="btn primary" style="flex:1" data-action="edit-log" data-id="${l.id}">수정</button>
       <button class="btn danger" data-action="delete-log" data-id="${l.id}">삭제</button>
     </div>` : `<div class="hint" style="text-align:center">이 계정은 일지 작성만 가능하며, 기존 일지는 수정·삭제할 수 없습니다.</div>`}
-  `);
+  `;
+}
+function openLogDetail(id){
+  const l = store.logs.find(x=>x.id===id);
+  if(!l) return;
+  openPanel(logDetailFullHtml(l));
   setPanelTitle("작업일지 상세");
+}
+// 달력 팝업 안에서 일지를 누른 경우 — 전체화면으로 덮지 않고 팝업 위에 팝업으로 띄운다
+let logPopId = null;
+function showLogPop(id){
+  const l = store.logs.find(x=>x.id===id);
+  if(!l) return;
+  let el = $("#logpop");
+  const fresh = !el;
+  if(fresh){
+    el = document.createElement("div");
+    el.id = "logpop"; el.className = "daypop";
+    document.body.appendChild(el);
+    document.body.style.overflow = "hidden";
+    pushOverlay(destroyLogPop);
+  }
+  logPopId = id;
+  el.innerHTML = `<div class="daypop-scrim" data-action="close-logpop"></div>
+    <div class="daypop-sheet" role="dialog" aria-modal="true" aria-label="작업일지 상세">
+      <button type="button" class="daypop-grab" data-action="close-logpop" aria-label="닫기"><span></span></button>
+      <div class="daypop-head"><b>작업일지 상세</b>
+        <button type="button" class="btn ghost sm daypop-x" data-action="close-logpop" aria-label="닫기">✕</button></div>
+      <div class="daypop-body">${logDetailFullHtml(l)}</div>
+    </div>`;
+  if(fresh) bindDayPopDrag(el);
+}
+function destroyLogPop(){
+  $("#logpop")?.remove();
+  logPopId = null;
+  unlockScrollIfFree();
+}
+function closeLogPop(){
+  if(!$("#logpop")) return;
+  popOverlaySync();
 }
 // 인쇄/PDF 저장 — 팝업으로 별도 문서를 띄워 브라우저 인쇄 대화상자를 연다.
 // (Artifact iframe 안에서 window.print()를 직접 부르면 sandbox 때문에 막히는 경우가 있어,
@@ -2830,7 +2871,7 @@ function showDayPop(ds){
 function destroyDayPop(){
   $("#daypop")?.remove();
   dayPopDate = null;
-  if(!panelRoot().innerHTML) document.body.style.overflow = "";
+  unlockScrollIfFree();
 }
 // 사용자가 직접 닫을 때(스크림 탭, ✕, 아래로 끌기)
 function closeDayPop(){
@@ -3067,11 +3108,27 @@ document.addEventListener("click", e=>{
   if(act==="settings") return openSettings();
   if(act==="logout"){ closePanel(); logout(); return; }
   if(act==="new-log") return openLogForm(null, { hospitalId:a.dataset.hid, date:a.dataset.date, type:a.dataset.type, note:a.dataset.note, scheduleId:a.dataset.scheduleId });
-  if(act==="open-log") return openLogDetail(id);
+  // 달력 팝업 안에서 누른 일지는 전체화면 대신 팝업으로
+  if(act==="open-log") return $("#daypop") ? showLogPop(id) : openLogDetail(id);
+  if(act==="close-logpop") return closeLogPop();
   if(act==="print-log") return printLogDoc(id);
-  if(act==="edit-log"){ closePanelSoft(); return openLogForm(id); }
+  if(act==="edit-log"){
+    if($("#logpop")){
+      // 팝업은 히스토리 항목까지 정상 반납하고 닫아야 한다. 그냥 DOM만 지우면 스택에 남은 항목이
+      // 아래쪽 달력 팝업보다 위에 쌓여서, 나중에 달력 팝업을 닫으려 할 때 그 항목이 대신 소비된다.
+      closeLogPop();
+      setTimeout(()=>openLogForm(id), 0);   // popstate가 정리된 뒤에 패널을 연다
+      return;
+    }
+    closePanelSoft();
+    return openLogForm(id); }
   if(act==="delete-log"){
-    confirmDialog("이 일지를 휴지통으로 이동할까요? 30일간 보관 후 자동 삭제됩니다.", ()=>{ trashLog(id); closePanel(); toast("휴지통으로 이동됨"); }, {yesLabel:"휴지통으로 이동"});
+    confirmDialog("이 일지를 휴지통으로 이동할까요? 30일간 보관 후 자동 삭제됩니다.", ()=>{
+      trashLog(id);
+      if($("#logpop")){ closeLogPop(); if(dayPopDate) showDayPop(dayPopDate); } // 아래 달력 팝업 내용도 갱신
+      else closePanel();
+      toast("휴지통으로 이동됨");
+    }, {yesLabel:"휴지통으로 이동"});
     return; }
   if(act==="new-hospital") return openHospitalForm(null);
   if(act==="edit-hospital") return openHospitalForm(id);
@@ -3132,7 +3189,7 @@ document.addEventListener("submit", e=>{
     openDay(sf.dataset.scheduleAdd);
     return; }
 });
-function closePanelSoft(){ panelRoot().innerHTML=""; document.body.style.overflow=""; }
+function closePanelSoft(){ panelRoot().innerHTML=""; unlockScrollIfFree(); }
 function currentLogList(){
   const q = parseHash().q;
   let list = store.logs.filter(l=>!l.deleted);
@@ -3193,11 +3250,12 @@ document.addEventListener("compositionend", e=>{
 let scrollTopNext = false;
 // 팝업 안의 "병원 보기" 같은 data-go 링크로 화면이 바뀌면 팝업도 같이 걷어낸다.
 // (closePanelSoft과 같은 방식 — 오버레이 스택에 남은 항목은 나중 뒤로가기에서 빈 동작으로 소비되고 끝)
-window.addEventListener("hashchange", ()=>{ closePanelSoft(); destroyDayPop(); render(); if(scrollTopNext){ scrollTopNext = false; window.scrollTo(0, 0); } });
+window.addEventListener("hashchange", ()=>{ closePanelSoft(); destroyLogPop(); destroyDayPop(); render(); if(scrollTopNext){ scrollTopNext = false; window.scrollTo(0, 0); } });
 window.addEventListener("keydown", e=>{
   if(e.key!=="Escape") return;
   if(document.querySelector(".lightbox")) return; // openLightbox가 Esc를 자체 처리
   if(panelRoot().innerHTML) closePanel();
+  else if($("#logpop")) closeLogPop();
   else if($("#daypop")) closeDayPop();
 });
 
