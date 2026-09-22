@@ -364,14 +364,26 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
 .calwd{text-align:center;font-size:11px;color:var(--ink-3);font-weight:600;padding:2px 0}
 .calcell{min-height:68px;min-width:0;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:2px;
   border:1px solid var(--border);border-radius:10px;background:var(--surface);cursor:pointer;padding:4px 4px 5px;color:inherit;text-align:left}
-.calcell.empty{background:transparent;border:0;cursor:default}
-.calcell:hover:not(.empty){border-color:var(--accent)}
-.calcell.today{background:var(--accent-soft);border-color:var(--accent-line)}
-/* 오늘 = 강조색을 반전시킨 칩(벤토 레퍼런스의 today 처리) */
-.calcell.today .calnum{background:var(--accent);color:#fff;font-weight:800;border-radius:999px;padding:0;
-  min-width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;align-self:flex-start}
+.calcell:hover{border-color:var(--accent)}
 .calnum{font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--ink-2);padding-left:1px;font-weight:600}
+/* 한국 달력 관례 — 일요일 빨강 / 토요일 파랑 / 공휴일 빨강 (뒤에 오는 규칙이 이김) */
+.calwd.sun{color:#d0342c}
+.calwd.sat{color:#2563c9}
+.calcell.sun .calnum{color:#d0342c}
+.calcell.sat .calnum{color:#2563c9}
 .calcell.holiday .calnum{color:var(--crit);font-weight:700}
+/* 앞뒤 달 날짜는 흐리게(삼성 캘린더처럼 빈칸 대신 채워서 6주 고정) */
+.calcell.othermonth{background:var(--surface);opacity:.45}
+/* 오늘 = 강조색 숫자 / 선택한 날 = 강조색으로 채운 동그라미 */
+.calcell.today{background:var(--accent-soft);border-color:var(--accent-line)}
+.calcell.today .calnum{color:var(--accent);font-weight:800}
+.calcell.selected{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.calcell.selected .calnum,.calcell.today.selected .calnum{background:var(--accent);color:#fff;font-weight:800;border-radius:999px;padding:0;
+  min-width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;align-self:flex-start}
+/* 주간/월간 전환 손잡이 */
+.calhandle{display:block;width:100%;border:0;background:none;padding:7px 0 2px;cursor:pointer}
+.calhandle span{display:block;width:38px;height:4px;border-radius:999px;background:var(--border-strong);margin:0 auto}
+.calhandle:hover span{background:var(--accent)}
 .calholname{font-size:8.5px;line-height:1.25;color:var(--crit);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:1px}
 .caltags{display:flex;flex-direction:column;gap:1px;min-width:0}
 .caltag{font-size:9px;line-height:1.3;padding:1px 3px;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -384,6 +396,12 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
 .caldot.cal-log{background:var(--done-bg)}
 .calkey{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;font-size:11.5px;color:var(--ink-2)}
 .calkey span{display:inline-flex;align-items:center;gap:5px}
+/* 달력 아래 "선택한 날의 일정" 시트 (삼성 캘린더 월간 보기 하단) */
+.daysheet{margin-top:14px}
+.daysheet-h{display:flex;align-items:baseline;gap:8px;margin:0 2px 8px}
+.daysheet-h b{font-size:16px;font-weight:800;letter-spacing:-.02em}
+.dayhol{font-size:12px;font-weight:700;color:var(--crit)}
+.daysheet-body{display:flex;flex-direction:column;gap:10px}
 
 .banner{display:flex;gap:10px;align-items:center;padding:10px 13px;border-radius:8px;font-size:13px;margin-bottom:14px}
 .banner.info{background:var(--accent-soft);color:var(--accent)}
@@ -862,6 +880,12 @@ const store = { hospitals:[], logs:[], photos:[], prep:[], schedule:[] };
 const _kstFmt = new Intl.DateTimeFormat("en-CA", { timeZone:"Asia/Seoul", year:"numeric", month:"2-digit", day:"2-digit" });
 const kstDateStr = (d) => _kstFmt.format(d || new Date());
 let calMonth = kstDateStr().slice(0,7); // "YYYY-MM", 대시보드 달력 상태
+// 삼성 캘린더와 같은 조작: 날짜를 누르면 선택만 되고(전체화면 X) 달력 아래에 그날 일정이 펼쳐진다.
+let calSelected = kstDateStr();         // 선택된 날짜 "YYYY-MM-DD"
+let calView = "month";                  // "month" | "week" — 위아래 스와이프로 전환
+function ymdLocal(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function addDaysStr(s,n){ const d=new Date(s+"T00:00:00"); d.setDate(d.getDate()+n); return ymdLocal(d); }
+function weekStartStr(s){ const d=new Date(s+"T00:00:00"); d.setDate(d.getDate()-d.getDay()); return ymdLocal(d); }
 let route = parseHash();
 const local = {
   get(k,d){ try{ const v=localStorage.getItem("mri."+k); return v==null?d:JSON.parse(v);}catch(e){return d;} },
@@ -1072,14 +1096,27 @@ async function delSchedule(id){ await deleteDoc("schedule", id); }
 let calAnimDir = 0; // -1 이전달, 1 다음달 — 다음 렌더에서 슬라이드 인 방향
 function calShift(delta){
   if(delta==="today"){
-    const t = kstDateStr().slice(0,7);
-    calAnimDir = t < calMonth ? -1 : t > calMonth ? 1 : 0;
-    calMonth = t;
+    const t = kstDateStr();
+    calAnimDir = t.slice(0,7) < calMonth ? -1 : t.slice(0,7) > calMonth ? 1 : 0;
+    calMonth = t.slice(0,7); calSelected = t;
+  } else if(calView === "week"){
+    // 주간 보기에서는 한 주씩 넘어간다(삼성 캘린더와 동일)
+    calSelected = addDaysStr(calSelected, delta*7);
+    calMonth = calSelected.slice(0,7);
+    calAnimDir = delta > 0 ? 1 : -1;
   } else {
     const [y,m] = calMonth.split("-").map(Number); const d = new Date(y, m-1+delta, 1);
     calMonth = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
     calAnimDir = delta > 0 ? 1 : -1;
+    // 달을 넘겨도 선택 날짜는 같은 일자로 따라간다(그 달에 없는 날짜면 말일로)
+    const dim = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+    calSelected = calMonth + "-" + String(Math.min(Number(calSelected.slice(8,10))||1, dim)).padStart(2,"0");
   }
+  render();
+}
+function calSetView(v){
+  if(calView === v) return;
+  calView = v;
   render();
 }
 const DUE_OVERRIDE_KEY = { "PM":"pmOverride", "ACR정밀":"acrFullOverride", "ACR서류":"acrDocOverride" };
@@ -1307,8 +1344,6 @@ function sampleBanner(){
 
 function calendarHtml(){
   const [y,m] = calMonth.split("-").map(Number); // m: 1-12
-  const daysInMonth = new Date(y, m, 0).getDate();
-  const startWeekday = new Date(y, m-1, 1).getDay(); // 0=일
   const dueMap = calendarDueMap();
   const logsMap = {};
   store.logs.filter(l=>!l.deleted && l.date).forEach(l=>{
@@ -1316,11 +1351,12 @@ function calendarHtml(){
     (logsMap[l.date] = logsMap[l.date] || new Set()).add(hname);
   });
   const today = todayStr();
-  const pad2 = n => String(n).padStart(2,"0");
-  let cells = "";
-  for(let i=0;i<startWeekday;i++) cells += `<div class="calcell empty"></div>`;
-  for(let d=1; d<=daysInMonth; d++){
-    const ds = `${y}-${pad2(m)}-${pad2(d)}`;
+  // 삼성 캘린더처럼 앞뒤 달 날짜까지 채워서 월간은 항상 6주 고정, 주간은 선택된 날이 속한 한 주만.
+  const gridStart = calView === "week" ? weekStartStr(calSelected) : weekStartStr(`${calMonth}-01`);
+  const gridLen = calView === "week" ? 7 : 42;
+  const cells = Array.from({length:gridLen}, (_,i)=>addDaysStr(gridStart, i)).map(ds=>{
+    const dnum = Number(ds.slice(8,10));
+    const dow = new Date(ds+"T00:00:00").getDay();
     const sched = scheduleForDate(ds);
     const due = dueMap[ds]||[];
     const done = [...(logsMap[ds]||[])];
@@ -1332,11 +1368,15 @@ function calendarHtml(){
     ];
     const tags = items.map(it=>`<span class="caltag ${it.cls}">${esc(it.name)}</span>`).join("");
     const hol = KR_HOLIDAYS[ds];
-    cells += `<button type="button" class="calcell${ds===today?" today":""}${hol?" holiday":""}" data-action="open-day" data-date="${ds}">
-      <span class="calnum">${d}</span>${hol?`<span class="calholname">${esc(hol)}</span>`:""}<div class="caltags">${tags}</div></button>`;
-  }
-  const trail = (7 - ((startWeekday + daysInMonth) % 7)) % 7;
-  for(let i=0;i<trail;i++) cells += `<div class="calcell empty"></div>`;
+    const cls = ["calcell"];
+    if(ds.slice(0,7) !== calMonth) cls.push("othermonth");
+    if(dow === 0) cls.push("sun"); else if(dow === 6) cls.push("sat");
+    if(hol) cls.push("holiday");
+    if(ds === today) cls.push("today");
+    if(ds === calSelected) cls.push("selected");
+    return `<button type="button" class="${cls.join(" ")}" data-action="open-day" data-date="${ds}">
+      <span class="calnum">${dnum}</span>${hol?`<span class="calholname">${esc(hol)}</span>`:""}<div class="caltags">${tags}</div></button>`;
+  }).join("");
   const enterCls = calAnimDir>0 ? " cal-enter-next" : calAnimDir<0 ? " cal-enter-prev" : "";
   calAnimDir = 0;
   return `<div class="card calcard" id="cal-swipe">
@@ -1348,9 +1388,11 @@ function calendarHtml(){
     </div>
     <div class="calinner">
       <div class="calbody${enterCls}">
-        <div class="calgrid calweekdays">${["일","월","화","수","목","금","토"].map(w=>`<div class="calwd">${w}</div>`).join("")}</div>
+        <div class="calgrid calweekdays">${["일","월","화","수","목","금","토"].map((w,i)=>`<div class="calwd${i===0?" sun":i===6?" sat":""}">${w}</div>`).join("")}</div>
         <div class="calgrid">${cells}</div>
       </div>
+      <button type="button" class="calhandle" data-action="cal-toggle-view"
+        aria-label="${calView==="month"?"주간 보기로 접기":"월간 보기로 펼치기"}"><span></span></button>
       <div class="calkey"><span><span class="caldot cal-log"></span> 작성된 일지</span><span><span class="caldot cal-pm"></span> PM 예정</span><span><span class="caldot cal-acr"></span> ACR 예정</span><span><span class="caldot cal-sched"></span> 등록한 일정</span></div>
     </div>
   </div>`;
@@ -1396,6 +1438,7 @@ function viewDash(){
 
     <div class="section-t"><h2>일정 달력</h2></div>
     ${calendarHtml()}
+    ${daySheetHtml()}
 
     <div class="section-t" id="due-section"><h2>다가오는 일정 · ${WINDOW}일 이내 (PM · ACR)</h2><button class="btn ghost sm" data-nav="hospitals">전체 병원</button></div>
     ${ due.length ? `<div class="rows">${due.map(x=>{
@@ -1432,6 +1475,13 @@ function bindCalSwipe(){
     const dx=e.touches[0].clientX-sx, dy=e.touches[0].clientY-sy;
     if(!dragging){
       if(Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)*1.3) dragging=true;
+      // 세로로 끌면 주간/월간 전환(삼성 캘린더: 위로 접으면 주간, 아래로 펼치면 월간)
+      else if(Math.abs(dy) > 26 && Math.abs(dy) > Math.abs(dx)*1.5){
+        const want = dy < 0 ? "week" : "month";
+        sx=null; done=true; body.style.transform=""; body.style.opacity="";
+        if(calView !== want) calSetView(want);
+        return;
+      }
       else if(Math.abs(dy) > 10){ sx=null; body.style.transform=""; body.style.opacity=""; return; }
       else return;
     }
@@ -2711,14 +2761,35 @@ function openSettings(){
 }
 function getUserLabel(){ return "이 기기 설정으로 저장됩니다"; }
 
-/* ---- 달력 하루 상세 ---- */
+/* ---- 달력 하루 상세 ----
+   삼성 캘린더와 같은 방식: 전체화면 패널이 아니라 달력 바로 아래에 선택한 날의 일정이 펼쳐진다.
+   openDay(날짜)는 "그 날짜를 선택"하는 동작이고, 실제 내용은 dayDetailHtml()이 만든다. */
 function openDay(dateStr){
+  if(!dateStr) return;
+  calSelected = dateStr;
+  calMonth = dateStr.slice(0,7);
+  calAnimDir = 0;
+  const hadPanel = !!panelRoot().innerHTML;
+  if(hadPanel) closePanel();                 // closePanel()이 render()까지 한다
+  if(route.path !== "dash") go("dash");
+  else if(!hadPanel) render();
+  setTimeout(()=>{ $("#daysheet")?.scrollIntoView({behavior:"smooth", block:"nearest"}); }, 0);
+}
+function daySheetHtml(){
+  const ds = calSelected;
+  const hol = KR_HOLIDAYS[ds];
+  return `<div class="daysheet" id="daysheet">
+    <div class="daysheet-h"><b>${fmtDate(ds)}</b>${hol?`<span class="dayhol">${esc(hol)}</span>`:""}</div>
+    <div class="daysheet-body">${dayDetailHtml(ds)}</div>
+  </div>`;
+}
+function dayDetailHtml(dateStr){
   const sched = scheduleForDate(dateStr);
   const due = calendarDueMap()[dateStr] || [];
   const dayLogs = store.logs.filter(l=>!l.deleted && l.date===dateStr).sort(byDateDesc);
   const hospOpts = store.hospitals.slice().sort(koSort)
     .map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join("");
-  openPanel(`
+  return `
     <div class="card formcard">
       <h3>작성된 일지 (${dayLogs.length})</h3>
       ${dayLogs.length ? `<div class="rows">${dayLogs.map(logRow).join("")}</div>` : `<div class="empty" style="padding:10px 0">이 날짜에 작성된 일지가 없습니다.</div>`}
@@ -2762,8 +2833,7 @@ function openDay(dateStr){
       <div class="field"><label>메모</label><input name="note" placeholder="예: 오전 방문 예정"></div>
       <button type="submit" class="btn primary">일정 추가</button>
     </form>
-  `);
-  setPanelTitle(fmtDate(dateStr) + " 일정" + (KR_HOLIDAYS[dateStr] ? ` · ${KR_HOLIDAYS[dateStr]}` : ""));
+  `;
 }
 
 function openScheduleEdit(id){
@@ -2948,6 +3018,7 @@ document.addEventListener("click", e=>{
   if(act==="cal-prev"||act==="cal-next"||act==="cal-today"){
     if(act==="cal-today") calShift("today"); else calShift(act==="cal-next"?1:-1);
     return; }
+  if(act==="cal-toggle-view"){ calSetView(calView==="month" ? "week" : "month"); return; }
   if(act==="open-day") return openDay(a.dataset.date);
   if(act==="edit-schedule") return openScheduleEdit(id);
   if(act==="del-schedule"){ delSchedule(id); openDay(a.dataset.date); return; }
