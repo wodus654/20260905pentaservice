@@ -2166,7 +2166,10 @@ function openLogForm(id, preset){
     date: p.date || todayStr(), status:"done",
     hospitalId: p.hospitalId || local.get("lastHid","") || (store.hospitals[0]||{}).id || "",
     engineer: engineer,
-    title: p.note || "",   // 등록한 일정의 메모는 제목으로 가져온다(조치 내용이 아니라)
+    // 등록한 일정의 메모 — "기타" 일정은 메모가 곧 그 방문의 이름이라 제목으로,
+    // 나머지(PM·고장수리 등)는 제목이 따로 있으므로 조치 내용으로 넣는다
+    title: p.type === "ETC" ? (p.note || "") : "",
+    description: p.type === "ETC" ? "" : (p.note || ""),
   };
   // 등록한 일정에서 "일지 작성"으로 넘어온 경우 — 저장되면 그 일정은 처리된 것이므로 자동 삭제
   const fromScheduleId = (!editing && p.scheduleId) || null;
