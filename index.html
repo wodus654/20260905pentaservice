@@ -1958,7 +1958,7 @@ function showLogPop(id){
         <button type="button" class="btn ghost sm daypop-x" data-action="close-logpop" aria-label="닫기">✕</button></div>
       <div class="daypop-body">${logDetailFullHtml(l)}</div>
     </div>`;
-  if(fresh) bindDayPopDrag(el);
+  if(fresh) bindPopDrag(el, closeLogPop);
 }
 function destroyLogPop(){
   $("#logpop")?.remove();
@@ -2880,7 +2880,7 @@ function showDayPop(ds){
     pushOverlay(destroyDayPop);   // 폰 뒤로가기로 닫히도록 공용 오버레이 스택에 등록
   }
   el.innerHTML = dayPopHtml(ds);
-  if(fresh) bindDayPopDrag(el);
+  if(fresh) bindPopDrag(el, closeDayPop);
 }
 // 오버레이 스택이 부르는 실제 정리(뒤로가기 등)
 function destroyDayPop(){
@@ -2893,10 +2893,14 @@ function closeDayPop(){
   if(!$("#daypop")) return;
   popOverlaySync();
 }
-// 삼성 캘린더처럼 시트를 아래로 끌어내려 닫기
-function bindDayPopDrag(el){
+// 시트를 아래로 끌어내려 닫기.
+// onClose는 반드시 그 팝업 자신을 닫는 함수여야 한다 — 예전엔 여기서 closeDayPop()을
+// 고정으로 불러서, 목록에서 연 일지 팝업(달력 팝업이 없는 경우)은 끌어내려도 닫히지 않고
+// 시트만 화면 밖으로 밀려 회색 배경만 남아 있었다.
+function bindPopDrag(el, onClose){
   const sheet = el.querySelector(".daypop-sheet");
   const body = el.querySelector(".daypop-body");
+  const scrim = el.querySelector(".daypop-scrim");
   if(!sheet) return;
   let sy = null, dy = 0, dragging = false;
   sheet.addEventListener("touchstart", e=>{
@@ -2905,6 +2909,7 @@ function bindDayPopDrag(el){
     if(body && body.scrollTop > 0 && body.contains(e.target)){ sy = null; return; }
     sy = e.touches[0].clientY; dy = 0; dragging = false;
     sheet.style.transition = "none";
+    if(scrim) scrim.style.transition = "none";
   }, {passive:true});
   sheet.addEventListener("touchmove", e=>{
     if(sy == null) return;
@@ -2913,13 +2918,22 @@ function bindDayPopDrag(el){
     if(!dragging && dy < 6) return;
     dragging = true;
     sheet.style.transform = `translateY(${dy}px)`;
+    // 시트가 내려간 만큼 뒤 배경도 같이 옅어져야 "회색만 덮인" 상태가 안 보인다
+    if(scrim) scrim.style.opacity = String(Math.max(0, 1 - dy / (sheet.offsetHeight || 400)));
   }, {passive:true});
   sheet.addEventListener("touchend", ()=>{
     if(sy == null) return;
     sy = null;
     sheet.style.transition = "transform .16s ease-out";
-    if(dragging && dy > 70){ sheet.style.transform = "translateY(100%)"; setTimeout(closeDayPop, 140); }
-    else sheet.style.transform = "";
+    if(scrim) scrim.style.transition = "opacity .16s ease-out";
+    if(dragging && dy > 70){
+      sheet.style.transform = "translateY(100%)";
+      if(scrim) scrim.style.opacity = "0";
+      setTimeout(onClose, 150);
+    } else {
+      sheet.style.transform = "";
+      if(scrim) scrim.style.opacity = "";
+    }
   }, {passive:true});
 }
 function dayDetailHtml(dateStr){
