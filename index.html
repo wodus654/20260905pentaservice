@@ -220,6 +220,15 @@ a{color:var(--accent)}
 .kvdue input[type=date]{padding:5px 8px;font-size:13px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);max-width:170px}
 .kvdue-hint{font-size:11px;color:var(--ink-3)}
 .kvdue .dueauto{font-size:12px;color:var(--accent);background:none;border:0;padding:2px;cursor:pointer;text-decoration:underline}
+/* 병원 메모 — 한 줄에 하나씩, 누르면 수정 팝업 */
+.memolist{display:flex;flex-direction:column;margin-top:5px;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.memorow{display:flex;align-items:center;gap:10px;width:100%;text-align:left;font:inherit;color:inherit;
+  background:var(--surface);border:0;border-bottom:1px solid var(--border);padding:9px 11px}
+.memorow:last-child{border-bottom:0}
+button.memorow{cursor:pointer}
+button.memorow:hover{background:var(--surface-2)}
+.memotext{flex:1;min-width:0;font-size:14px;overflow-wrap:break-word}
+.memoedit{flex:0 0 auto;font-size:11px;font-weight:700;color:var(--accent)}
 .contactline{margin-top:3px}
 .contactline:first-child{margin-top:0}
 .linklike{background:none;border:0;padding:0;font:inherit;color:var(--accent);font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
@@ -930,7 +939,8 @@ function canLog(){ const r = role(); return r === "admin" || r === "logger"; } /
 // logger 계정이 예외적으로 허용되는 클릭 액션 (새 일지 작성 흐름만)
 const LOGGER_OK_ACTIONS = new Set(["new-log"]);
 const MUTATING_ACTIONS = new Set(["new-log","edit-log","delete-log","new-hospital","edit-hospital","delete-hospital",
-  "clear-samples","restore-log","purge-log","empty-trash","prep-done","prep-del","del-schedule","edit-schedule"]);
+  "clear-samples","restore-log","purge-log","empty-trash","prep-done","prep-del","del-schedule","edit-schedule",
+  "add-memo","edit-memo","del-memo"]);
 function renderLogin(){
   const lv = $("#loginview");
   lv.innerHTML = `<form id="loginform" class="logincard">
@@ -1611,7 +1621,15 @@ function viewHospital(){
         <div class="kv"><span class="kk">다음 ACR 서류 (매년)</span><span class="vv tnum">${acr.doc.covered?`<span style="color:var(--ink-3)">${acr.doc.due?new Date(acr.doc.due).getFullYear():""}년 정밀 시행 → 서류 생략</span>`:(acr.doc.due?fmtDate(acr.doc.due):"미정")} ${acr.doc.covered?"":dueChip(acr.doc)}</span>${acr.doc.covered?"":dueEdit("acrDocOverride", acr.doc.due)}</div>
       </div>
       ${h.address?`<div class="kv"><span class="kk">주소</span><span class="vv">${esc(h.address)}</span></div>`:""}
-      ${h.notes?`<div class="kv"><span class="kk">메모</span><span class="vv">${esc(h.notes)}</span></div>`:""}
+      <div class="kv"><span class="kk">메모</span>
+        ${hospMemos(h).length ? `<div class="memolist">${hospMemos(h).map((m,i)=>
+          canEdit()
+            ? `<button type="button" class="memorow" data-action="edit-memo" data-hid="${h.id}" data-i="${i}">
+                 <span class="memotext">${esc(m)}</span><span class="memoedit">수정</span></button>`
+            : `<div class="memorow"><span class="memotext">${esc(m)}</span></div>`
+        ).join("")}</div>` : `<span class="vv" style="color:var(--ink-3)">등록된 메모가 없습니다.</span>`}
+        ${canEdit()?`<button type="button" class="btn sm" style="align-self:flex-start;margin-top:8px" data-action="add-memo" data-hid="${h.id}">＋ 메모 추가</button>`:""}
+      </div>
     </div>
 
     <div class="section-t"><h2>다음 방문 준비물</h2></div>
@@ -1717,7 +1735,7 @@ const panelRoot = () => $("#panel-root");
 let panelOverlayActive = false;
 // 겹쳐 뜨는 오버레이(패널/달력 팝업/일지 팝업)가 하나라도 남아 있으면 배경 스크롤 잠금을 유지한다
 function unlockScrollIfFree(){
-  if(!panelRoot().innerHTML && !$("#daypop") && !$("#logpop")) document.body.style.overflow = "";
+  if(!panelRoot().innerHTML && !$("#daypop") && !$("#logpop") && !$("#memopop")) document.body.style.overflow = "";
 }
 // 팝업에서 전체화면 화면(수정 폼 등)으로 넘어갈 때: 열려 있는 팝업을 히스토리 항목까지
 // 전부 반납하고 닫은 뒤에 fn()을 실행한다. history.go(-n)은 popstate가 비동기로 오므로
@@ -1964,6 +1982,80 @@ function destroyLogPop(){
   $("#logpop")?.remove();
   logPopId = null;
   unlockScrollIfFree();
+}
+
+/* ---- 병원 메모 ----
+   저장은 예전처럼 h.notes 한 덩어리 텍스트 그대로 두고, 한 줄을 메모 하나로 본다.
+   그래서 이미 들어있던 메모도 그대로 목록이 되고, 병원 수정 폼의 메모 칸과도 어긋나지 않는다. */
+function hospMemos(h){ return (h?.notes||"").split("\n").map(s=>s.trim()).filter(Boolean); }
+let memoPop = null;   // {hid, idx} — idx가 null이면 새 메모
+function showMemoPop(hid, idx){
+  const h = hospById(hid); if(!h) return;
+  const memos = hospMemos(h);
+  const editing = idx != null && idx >= 0 && idx < memos.length;
+  let el = $("#memopop");
+  const fresh = !el;
+  if(fresh){
+    el = document.createElement("div");
+    el.id = "memopop"; el.className = "daypop";
+    document.body.appendChild(el);
+    document.body.style.overflow = "hidden";
+    pushOverlay(destroyMemoPop);
+  }
+  memoPop = { hid, idx: editing ? idx : null };
+  el.innerHTML = `<div class="daypop-scrim" data-action="close-memopop"></div>
+    <div class="daypop-sheet" role="dialog" aria-modal="true" aria-label="병원 메모">
+      <button type="button" class="daypop-grab" data-action="close-memopop" aria-label="닫기"><span></span></button>
+      <div class="daypop-head"><b>${editing?"메모 수정":"메모 추가"}</b>
+        <button type="button" class="btn ghost sm daypop-x" data-action="close-memopop" aria-label="닫기">✕</button></div>
+      <div class="daypop-body">
+        <form class="card formcard" id="memoform">
+          <div class="field"><label>${esc(h.name)}</label>
+            <textarea name="memo" placeholder="예: PM시 Gradient Chiller leakage 확인">${esc(editing?memos[idx]:"")}</textarea></div>
+          <div style="display:flex;gap:8px">
+            <button type="submit" class="btn primary" style="flex:1">${editing?"저장":"추가"}</button>
+            ${editing?`<button type="button" class="btn danger" data-action="del-memo">삭제</button>`:""}
+          </div>
+        </form>
+      </div>
+    </div>`;
+  if(fresh) bindPopDrag(el, closeMemoPop);
+  setTimeout(()=>{ const t = $("#memoform textarea"); if(t){ autoGrowTextarea(t); t.focus(); } }, 0);
+}
+function destroyMemoPop(){ $("#memopop")?.remove(); memoPop = null; unlockScrollIfFree(); }
+function closeMemoPop(){ if(!$("#memopop")) return; popOverlaySync(); }
+async function writeMemos(hid, memos){
+  const h = hospById(hid); if(!h) return;
+  await saveDoc("hospitals", Object.assign({}, h, { notes: memos.join("\n") }));
+}
+async function submitMemo(text){
+  if(!memoPop) return;
+  const { hid, idx } = memoPop;
+  const h = hospById(hid); if(!h) return;
+  const memos = hospMemos(h);
+  const t = (text||"").trim();
+  if(idx == null){
+    if(!t){ closeMemoPop(); return; }
+    memos.push(t);
+  } else if(t) memos[idx] = t;
+  else memos.splice(idx, 1);           // 내용을 비우고 저장하면 삭제와 같다
+  closeMemoPop();
+  await writeMemos(hid, memos);
+  toast(idx == null ? "메모를 추가했습니다" : "메모를 저장했습니다");
+}
+async function deleteMemo(){
+  if(!memoPop || memoPop.idx == null) return;
+  const { hid, idx } = memoPop;
+  const h = hospById(hid); if(!h) return;
+  const memos = hospMemos(h);
+  const removed = memos.splice(idx, 1)[0];
+  closeMemoPop();
+  await writeMemos(hid, memos);
+  toast("메모를 삭제했습니다", { label:"실행취소", fn: async ()=>{
+    const cur = hospMemos(hospById(hid));
+    cur.splice(Math.min(idx, cur.length), 0, removed);
+    await writeMemos(hid, cur);
+  }});
 }
 function closeLogPop(){
   if(!$("#logpop")) return;
@@ -3145,6 +3237,10 @@ document.addEventListener("click", e=>{
   // 일지 상세는 어디서 눌러도 팝업으로 본다(목록·달력 팝업·병원 상세 모두)
   if(act==="open-log") return showLogPop(id);
   if(act==="close-logpop") return closeLogPop();
+  if(act==="close-memopop") return closeMemoPop();
+  if(act==="add-memo") return showMemoPop(a.dataset.hid, null);
+  if(act==="edit-memo") return showMemoPop(a.dataset.hid, Number(a.dataset.i));
+  if(act==="del-memo"){ confirmDialog("이 메모를 삭제할까요?", deleteMemo, {yesLabel:"삭제"}); return; }
   if(act==="print-log") return printLogDoc(id);
   if(act==="edit-log"){
     // 수정으로 넘어갈 땐 일지 팝업뿐 아니라 그 아래 달력 팝업까지 전부 닫고 수정 화면만 남긴다
@@ -3199,6 +3295,11 @@ document.addEventListener("change", e=>{
   if(de && de.value){ setDueOverride(de.dataset.hid, de.dataset.ovkey, de.value, de.dataset.back); return; }
 });
 document.addEventListener("submit", e=>{
+  const mf = e.target.closest("#memoform");
+  if(mf){ e.preventDefault();
+    if(!canEdit()){ toast("보기 전용 계정입니다 — 데이터를 수정할 수 없습니다"); return; }
+    submitMemo(new FormData(mf).get("memo"));
+    return; }
   const pf = e.target.closest("[data-prep-add]");
   if(pf){ e.preventDefault();
     if(!canEdit()){ toast("보기 전용 계정입니다 — 데이터를 수정할 수 없습니다"); return; }
@@ -3278,11 +3379,12 @@ document.addEventListener("compositionend", e=>{
 let scrollTopNext = false;
 // 팝업 안의 "병원 보기" 같은 data-go 링크로 화면이 바뀌면 팝업도 같이 걷어낸다.
 // (closePanelSoft과 같은 방식 — 오버레이 스택에 남은 항목은 나중 뒤로가기에서 빈 동작으로 소비되고 끝)
-window.addEventListener("hashchange", ()=>{ closePanelSoft(); destroyLogPop(); destroyDayPop(); render(); if(scrollTopNext){ scrollTopNext = false; window.scrollTo(0, 0); } });
+window.addEventListener("hashchange", ()=>{ closePanelSoft(); destroyMemoPop(); destroyLogPop(); destroyDayPop(); render(); if(scrollTopNext){ scrollTopNext = false; window.scrollTo(0, 0); } });
 window.addEventListener("keydown", e=>{
   if(e.key!=="Escape") return;
   if(document.querySelector(".lightbox")) return; // openLightbox가 Esc를 자체 처리
   if(panelRoot().innerHTML) closePanel();
+  else if($("#memopop")) closeMemoPop();
   else if($("#logpop")) closeLogPop();
   else if($("#daypop")) closeDayPop();
 });
