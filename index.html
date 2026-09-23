@@ -2919,6 +2919,7 @@ function dayDetailHtml(dateStr){
     <div class="card formcard">
       <h3>작성된 일지 (${dayLogs.length})</h3>
       ${dayLogs.length ? `<div class="rows">${dayLogs.map(logRow).join("")}</div>` : `<div class="empty" style="padding:10px 0">이 날짜에 작성된 일지가 없습니다.</div>`}
+      ${canLog() ? `<button type="button" class="btn primary" data-action="new-log" data-date="${dateStr}">＋ 이 날짜로 일지 작성</button>` : ""}
     </div>
     ${due.length ? `<div class="card formcard">
       <h3>자동 계산된 예정 (PM·ACR)</h3>
@@ -3109,7 +3110,11 @@ document.addEventListener("click", e=>{
   if(act==="close-panel") return closePanel();
   if(act==="settings") return openSettings();
   if(act==="logout"){ closePanel(); logout(); return; }
-  if(act==="new-log") return openLogForm(null, { hospitalId:a.dataset.hid, date:a.dataset.date, type:a.dataset.type, note:a.dataset.note, scheduleId:a.dataset.scheduleId });
+  if(act==="new-log"){
+    // 팝업이 지워지면 a도 같이 사라지므로 preset을 먼저 읽어둔다
+    const preset = { hospitalId:a.dataset.hid, date:a.dataset.date, type:a.dataset.type, note:a.dataset.note, scheduleId:a.dataset.scheduleId };
+    if($("#logpop") || $("#daypop")) return closePopupsThen(()=>openLogForm(null, preset));
+    return openLogForm(null, preset); }
   // 일지 상세는 어디서 눌러도 팝업으로 본다(목록·달력 팝업·병원 상세 모두)
   if(act==="open-log") return showLogPop(id);
   if(act==="close-logpop") return closeLogPop();
