@@ -27,7 +27,7 @@
      색 구분은 그대로: 예정=빨강 / ACR 예정=보라 / 완료=차분한 회청색 */
   --sched-bg:#fbe0dd; --sched-ink:#b3302a;
   --acrsched-bg:#eae1f7; --acrsched-ink:#5d3f8f;
-  --prog-bg:#fceeca; --prog-ink:#8a5a12;
+  --open-bg:#fceeca; --open-ink:#8a5a12;   /* 아직 안 끝난 일지(진행중·재방문 필요) */
   --done-bg:#e4e9f2; --done-ink:#3b465c;
   --shadow:none;
   --radius:14px;
@@ -393,13 +393,13 @@ table.acrtable input:focus{outline:none;border-color:var(--accent);background:va
 .caltag{font-size:9px;font-weight:600;line-height:1.35;padding:1px 4px;border-radius:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .caltag.cal-pm,.caltag.cal-sched{background:var(--sched-bg);color:var(--sched-ink)}
 .caltag.cal-acr{background:var(--acrsched-bg);color:var(--acrsched-ink)}
-.caltag.cal-prog{background:var(--prog-bg);color:var(--prog-ink)}
+.caltag.cal-open{background:var(--open-bg);color:var(--open-ink)}
 .caltag.cal-log{background:var(--done-bg);color:var(--done-ink)}
 /* 범례 점은 연한 배경색이 아니라 글자색(진한 쪽)을 써야 보인다 */
 .caldot{width:6px;height:6px;border-radius:999px;display:inline-block;background:var(--ink-3)}
 .caldot.cal-pm,.caldot.cal-sched{background:var(--sched-ink)}
 .caldot.cal-acr{background:var(--acrsched-ink)}
-.caldot.cal-prog{background:var(--prog-ink)}
+.caldot.cal-open{background:var(--open-ink)}
 .caldot.cal-log{background:var(--done-ink)}
 .calkey{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;font-size:11.5px;color:var(--ink-2)}
 .calkey span{display:inline-flex;align-items:center;gap:5px}
@@ -535,6 +535,8 @@ const STATUS = {
   progress: {label:"진행중",     cls:"progress"},
   revisit:  {label:"재방문 필요", cls:"revisit"},
 };
+// 달력 태그는 9px이라 칸이 좁다 — 미완료 상태는 짧은 말로 줄여 쓴다
+const CAL_OPEN_LABEL = { progress:"진행중", revisit:"재방문" };
 // GE Signa PM 정기점검 항목 (펜타웍스 MR정기점검보고서 기준)
 const PM_FORM = [
   ["Image Quality", [
@@ -1360,12 +1362,12 @@ function sampleBanner(){
 function calendarHtml(){
   const [y,m] = calMonth.split("-").map(Number); // m: 1-12
   const dueMap = calendarDueMap();
-  // 날짜 → Map(병원명 → "progress"|"done"). 같은 날 같은 병원에 여러 건이면 진행중을 우선 표시한다.
+  // 날짜 → Map(병원명 → 상태). 같은 날 같은 병원에 여러 건이면 안 끝난 쪽을 우선 표시한다.
   const logsMap = {};
   store.logs.filter(l=>!l.deleted && l.date).forEach(l=>{
     const hname = hospById(l.hospitalId)?.name || l.hospitalName || "—";
     const m = (logsMap[l.date] = logsMap[l.date] || new Map());
-    if(l.status === "progress") m.set(hname, "progress");
+    if(l.status && l.status !== "done") m.set(hname, l.status);
     else if(!m.has(hname)) m.set(hname, "done");
   });
   const today = todayStr();
@@ -1376,14 +1378,14 @@ function calendarHtml(){
     const dow = new Date(ds+"T00:00:00").getDay();
     const sched = scheduleForDate(ds);
     const due = dueMap[ds]||[];
-    // 진행중인 일지를 완료된 것보다 위에 놓아 눈에 먼저 들어오게 한다
-    const logged = [...(logsMap[ds]||[])].sort((a,b)=>(a[1]==="progress"?0:1)-(b[1]==="progress"?0:1));
-    // 예정(빨강)을 맨 위에, 그 아래 진행중(주황), 완료(회청)는 맨 아래.
+    // 안 끝난 일지(진행중·재방문 필요)를 완료된 것보다 위에 놓아 눈에 먼저 들어오게 한다
+    const logged = [...(logsMap[ds]||[])].sort((a,b)=>(a[1]!=="done"?0:1)-(b[1]!=="done"?0:1));
+    // 예정(빨강)을 맨 위에, 그 아래 미완료(주황), 완료(회청)는 맨 아래.
     const items = [
       ...due.map(x=>({name:(x.kind==="PM"?"PM·":"ACR·")+x.hname, cls: x.kind==="PM"?"cal-pm":"cal-acr"})),
       ...sched.map(s=>({name:(s.hospitalName||"—")+" (예정)", cls:"cal-sched"})),
-      ...logged.map(([name,st])=>({name: st==="progress" ? name+" (진행중)" : name,
-        cls: st==="progress" ? "cal-prog" : "cal-log"})),
+      ...logged.map(([name,st])=>({name: st!=="done" ? `${name} (${CAL_OPEN_LABEL[st]||"미완료"})` : name,
+        cls: st!=="done" ? "cal-open" : "cal-log"})),
     ];
     const tags = items.map(it=>`<span class="caltag ${it.cls}">${esc(it.name)}</span>`).join("");
     const hol = KR_HOLIDAYS[ds];
@@ -1410,7 +1412,7 @@ function calendarHtml(){
         <div class="calgrid calweekdays">${["일","월","화","수","목","금","토"].map((w,i)=>`<div class="calwd${i===0?" sun":i===6?" sat":""}">${w}</div>`).join("")}</div>
         <div class="calgrid">${cells}</div>
       </div>
-      <div class="calkey"><span><span class="caldot cal-log"></span> 작성된 일지</span><span><span class="caldot cal-prog"></span> 진행중</span><span><span class="caldot cal-pm"></span> PM 예정</span><span><span class="caldot cal-acr"></span> ACR 예정</span><span><span class="caldot cal-sched"></span> 등록한 일정</span></div>
+      <div class="calkey"><span><span class="caldot cal-log"></span> 작성된 일지</span><span><span class="caldot cal-open"></span> 진행중 · 재방문</span><span><span class="caldot cal-pm"></span> PM 예정</span><span><span class="caldot cal-acr"></span> ACR 예정</span><span><span class="caldot cal-sched"></span> 등록한 일정</span></div>
     </div>
   </div>`;
 }
