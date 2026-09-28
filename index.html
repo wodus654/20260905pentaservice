@@ -2148,7 +2148,11 @@ ${body}
     st.textContent = "@page{ size:210mm " + mm.toFixed(1) + "mm; margin:12mm; }";
     document.head.appendChild(st);
   }
-  fitPage();
+  // 이 문서가 스스로 인쇄창을 띄운다(띄워준 쪽에서 print()를 부르지 않아도 되게).
+  // load 이후에 재면 로고·글꼴까지 반영된 실제 높이가 나온다.
+  function go(){ fitPage(); setTimeout(function(){ try{ window.focus(); window.print(); }catch(e){} }, 80); }
+  if(document.readyState === "complete") go();
+  else window.addEventListener("load", go);
 })();
 <\/script>
 </body></html>`;
@@ -2156,12 +2160,21 @@ ${body}
 function printLogDoc(id){
   const l = store.logs.find(x=>x.id===id);
   if(!l){ toast("일지를 찾을 수 없습니다"); return; }
-  const win = window.open("", "_blank");
-  if(!win){ toast("팝업이 차단되었습니다 — 팝업을 허용한 뒤 다시 시도하세요"); return; }
-  win.document.open();
-  win.document.write(buildPrintHtml(l));
-  win.document.close();
-  setTimeout(()=>{ try{ win.focus(); win.print(); }catch(e){} }, 350);
+  const html = buildPrintHtml(l);
+  // 빈 창(about:blank)을 열고 document.write로 밀어넣으면, 그 창의 최초 about:blank
+  // 로드가 뒤늦게 끝나면서 써넣은 내용을 덮어써 빈 화면이 되는 경우가 있다(PC에서 발생).
+  // blob URL로 "진짜 문서"를 열면 그 경합 자체가 없다. 인쇄는 문서가 스스로 띄운다.
+  let url = "";
+  try { url = URL.createObjectURL(new Blob([html], {type:"text/html;charset=utf-8"})); } catch(e){ url = ""; }
+  if(url){
+    const win = window.open(url, "_blank");
+    if(win){ setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} }, 60000); return; }
+    try{ URL.revokeObjectURL(url); }catch(e){}
+  }
+  // blob이 막힌 환경 대비 — 예전 방식으로 한 번 더 시도
+  const win2 = window.open("", "_blank");
+  if(!win2){ toast("팝업이 차단되었습니다 — 팝업을 허용한 뒤 다시 시도하세요"); return; }
+  win2.document.open(); win2.document.write(html); win2.document.close();
 }
 function kvBlock(k,v){ return `<div class="kv"><span class="kk">${esc(k)}</span><span class="vv" style="white-space:pre-wrap">${esc(v)}</span></div>`; }
 function pmBad(it){ return it.kind!=="fields" && (pmOptions(it.name).find(o=>o.v===it.result)||{}).t==="bad"; }
