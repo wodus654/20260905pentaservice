@@ -2154,16 +2154,19 @@ function buildPrintHtml(l){
   const body = logDetailBodyHtml(l,h,t,s,dur,true);
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(reportTitle)} - ${esc(hospName)}</title>
 <style>
-@page{ size:210mm 297mm; margin:12mm; }
+/* margin:0 이어야 브라우저가 날짜·제목·URL·쪽번호(머리글/바닥글)를 찍지 않는다.
+   실제 여백은 body padding 으로 준다. */
+@page{ size:210mm 297mm; margin:0; }
 *{box-sizing:border-box}
-body{font-family:"Malgun Gothic","Apple SD Gothic Neo","IBM Plex Sans KR",sans-serif;font-size:10.5px;line-height:1.35;color:#111;margin:0}
+body{font-family:"Malgun Gothic","Apple SD Gothic Neo","IBM Plex Sans KR",sans-serif;font-size:10.5px;line-height:1.35;color:#111;margin:0;padding:12mm}
 h3{font-size:12px;margin:6px 0 4px}
-.ftop{border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:3px}
+.ftop{border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:6px}
 .fbrandrow{display:flex;align-items:center;gap:8px}
 .flogo{width:24px;height:24px;object-fit:contain}
 .fbrandname{font-weight:800;font-size:15px;letter-spacing:.01em}
-.ftitle{font-size:19px;font-weight:800;margin-left:10px}
-.fcoinfo{font-size:8.5px;color:#333;margin-bottom:2px}
+.ftitle{font-size:19px;font-weight:800}
+.fsign{margin-top:18px;padding-top:6px;border-top:1px solid #999;display:flex;flex-direction:column;align-items:flex-end;gap:2px;break-inside:avoid}
+.fcoinfo{font-size:8.5px;color:#333;text-align:right;margin:0}
 .fwdate{font-size:12px;margin-bottom:4px}
 .fhospline{font-size:13px;font-weight:600;margin-bottom:10px}
 .kvgrid{display:grid;grid-template-columns:1fr 1fr;gap:3px 16px;margin-bottom:6px}
@@ -2206,20 +2209,24 @@ input[type=checkbox]{transform:scale(.85);vertical-align:middle}
 </style>
 </head><body>
 <div class="ftop">
-  <div class="fbrandrow">${logoSrc?`<img src="${logoSrc}" class="flogo">`:""}<span class="fbrandname">PENTA WORKS</span><span class="ftitle">${esc(reportTitle)}</span></div>
+  <div class="ftitle">${esc(reportTitle)}</div>
 </div>
-<div class="fcoinfo">${PENTA_ADDR_HTML}</div>
 <div class="fwdate">작성일 : ${wdate}</div>
 <div class="fhospline">병원명 : ${esc(hospName)} &nbsp;&nbsp;&nbsp; 장비명 : MRI</div>
 ${body}
+<div class="fsign">
+  <div class="fbrandrow">${logoSrc?`<img src="${logoSrc}" class="flogo">`:""}<span class="fbrandname">PENTA WORKS</span></div>
+  <div class="fcoinfo">${PENTA_ADDR_HTML}</div>
+</div>
 <script>
 (function(){
   function fitPage(){
+    // body padding(위아래 12mm)이 scrollHeight 에 이미 포함된다 — 여백을 또 더하면 안 된다.
     var px = document.body.scrollHeight;
-    var mm = px * 25.4 / 96 + 24 + 10;
+    var mm = px * 25.4 / 96 + 8;
     if(mm >= 297) return;
     var st = document.createElement("style");
-    st.textContent = "@page{ size:210mm " + mm.toFixed(1) + "mm; margin:12mm; }";
+    st.textContent = "@page{ size:210mm " + mm.toFixed(1) + "mm; margin:0; }";
     document.head.appendChild(st);
   }
   // 이 문서가 스스로 인쇄창을 띄운다(띄워준 쪽에서 print()를 부르지 않아도 되게).
