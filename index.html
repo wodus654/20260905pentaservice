@@ -143,7 +143,8 @@ a{color:var(--accent)}
 .thumb .up{position:absolute;inset:0;display:grid;place-items:center;background:var(--surface-2);color:var(--ink-3);font-size:12px}
 .lightbox{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.92);display:grid;place-items:center;padding:20px;cursor:zoom-out;overflow:hidden;touch-action:none}
 .lbtrack{display:grid;place-items:center;width:100%;height:100%;will-change:transform}
-.lightbox img{max-width:100%;max-height:100%;border-radius:8px;transform-origin:center center;will-change:transform;-webkit-user-select:none;user-select:none;-webkit-user-drag:none}
+.lightbox img{max-width:100%;max-height:100%;border-radius:8px;transform-origin:center center;will-change:transform;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;cursor:grab}
+.lightbox.lbgrabbing,.lightbox.lbgrabbing img{cursor:grabbing}
 .lbcount{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:2;background:rgba(0,0,0,.55);color:#fff;font-size:13px;font-weight:600;padding:4px 12px;border-radius:999px;letter-spacing:.02em}
 .lbnav{position:fixed;top:50%;transform:translateY(-50%);z-index:2;width:44px;height:44px;border-radius:999px;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:24px;line-height:1;cursor:pointer;display:grid;place-items:center;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
 .lbnav:disabled{opacity:.25;cursor:default}
@@ -1815,7 +1816,12 @@ function openLightbox(srcOrList, startIdx){
     d.appendChild(prevBtn); d.appendChild(nextBtn);
   }
   document.body.appendChild(d);
-  pushOverlay(()=>{ d.remove(); document.removeEventListener("keydown", onKey); });
+  pushOverlay(()=>{
+    d.remove();
+    document.removeEventListener("keydown", onKey);
+    window.removeEventListener("mousemove", onMouseMove);
+    window.removeEventListener("mouseup", onMouseUp);
+  });
 
   // 자체 핀치 줌/패닝 — 브라우저 기본 줌은 fixed 오버레이에서 축소가 안 먹는 기기가 있어서 직접 처리한다.
   let scale=1, tx=0, ty=0, touchUsed=false, moved=false, uiTouch=false;
@@ -1864,6 +1870,31 @@ function openLightbox(srcOrList, startIdx){
       setTimeout(()=>{ animating=false; }, 170);
     }, 160);
   }
+  // PC에서 드래그로 사진 위치 옮기기 — 배율과 상관없이 아무 데서나 끌 수 있다
+  let mpan = null, mMoved = false;
+  function onMouseMove(e){
+    if(!mpan) return;
+    if(!mMoved && Math.abs(e.clientX-mpan.sx) + Math.abs(e.clientY-mpan.sy) < 3) return;
+    mMoved = true;
+    tx = e.clientX - mpan.x; ty = e.clientY - mpan.y;
+    apply();
+  }
+  function onMouseUp(){
+    if(!mpan) return;
+    mpan = null;
+    d.classList.remove("lbgrabbing");
+  }
+  d.addEventListener("mousedown", e=>{
+    if(e.button !== 0) return;
+    if(e.target.closest && e.target.closest(".lbzoom, .lbnav")) return;
+    e.preventDefault();   // 이미지 기본 드래그(고스트 이미지) 막기
+    mpan = { x:e.clientX - tx, y:e.clientY - ty, sx:e.clientX, sy:e.clientY };
+    mMoved = false;
+    d.classList.add("lbgrabbing");
+  });
+  window.addEventListener("mousemove", onMouseMove);
+  window.addEventListener("mouseup", onMouseUp);
+
   zOut.addEventListener("click", e=>{ e.stopPropagation(); setZoom(scale/1.25); });
   zIn .addEventListener("click", e=>{ e.stopPropagation(); setZoom(scale*1.25); });
   zPct.addEventListener("click", e=>{ e.stopPropagation(); setZoom(1); });
@@ -1920,6 +1951,7 @@ function openLightbox(srcOrList, startIdx){
     if(!moved && !uiTouch && scale<=1.02) popOverlaySync();   // 확대 안 된 상태에서 그냥 탭 = 닫기
   });
   d.addEventListener("click", e=>{
+    if(mMoved){ mMoved = false; return; }   // 끌어서 옮긴 것이면 닫지 않는다
     if(e.target===prevBtn){ nav(-1); return; }
     if(e.target===nextBtn){ nav(1); return; }
     if(e.target.closest && e.target.closest(".lbzoom")) return;  // 줌 버튼 클릭은 닫기가 아니다
