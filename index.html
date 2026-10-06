@@ -1568,6 +1568,18 @@ function logRow(l){
   </button>`;
 }
 
+// 병원 목록 한 줄에 쓰는 장비명 / 소프트웨어 버전 요약. 장비가 여러 대면 "첫 대 외 N".
+function sysModelLabel(systems){
+  const ss = systems||[];
+  if(!ss.length) return "—";
+  const one = s => [s.model||"", s.tesla?s.tesla+"T":""].filter(Boolean).join(" ") || "—";
+  return ss.length===1 ? one(ss[0]) : one(ss[0]) + ` 외 ${ss.length-1}`;
+}
+function sysSwLabel(systems){
+  const vs = (systems||[]).map(s=>s.swVersion).filter(Boolean);
+  if(!vs.length) return "—";
+  return vs.length===1 ? vs[0] : vs[0] + ` 외 ${vs.length-1}`;
+}
 function hospitalListBody(){
   const q = (route.q.s||"").toLowerCase().trim();
   let list = [...store.hospitals].sort(koSort);
@@ -1585,6 +1597,8 @@ function hospitalListBody(){
           <span>MRI ${(h.systems||[]).length}대</span>
           <span>최근 PM ${lastPmDate(h.id)?fmtDate(lastPmDate(h.id)):"—"}</span>
           <span>최근 ACR ${(()=>{ const a = latestLog(h.id, l=>l.type==="ACR" && l.acrKind!=="pretest"); return a?fmtDate(a.date):"—"; })()}</span>
+          <span>장비 ${esc(sysModelLabel(h.systems))}</span>
+          <span>S/W ${esc(sysSwLabel(h.systems))}</span>
         </div></div>
         <div class="rright">${chip}</div>
       </button>`;
