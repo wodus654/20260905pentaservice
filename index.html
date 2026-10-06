@@ -141,8 +141,10 @@ a{color:var(--accent)}
 .seg button{flex:1;background:var(--surface);border:0;padding:9px 8px;font-weight:700;color:var(--ink-2);border-right:1px solid var(--border)}
 .seg button:last-child{border-right:0}
 .seg button.on{background:var(--accent);color:var(--accent-ink)}
-.seg.wrap{flex-wrap:wrap}
-.seg.wrap button{flex:1 1 44%;border-right:1px solid var(--border)}
+/* 페이지 레이아웃용 .wrap(max-width+margin:0 auto)과 이름이 겹치면 안 된다 —
+   겹치면 버튼이 적을 때 세그먼트가 가운데로 쪼그라든다 */
+.seg.segwrap{flex-wrap:wrap}
+.seg.segwrap button{flex:1 1 44%;border-right:1px solid var(--border)}
 
 /* photo upload */
 .photoadd{display:inline-flex;align-items:center;gap:7px;border:1px dashed var(--border-strong);background:var(--surface-2);
@@ -2517,7 +2519,7 @@ function openLogForm(id, preset){
 
   openPanel(`<form id="logform" class="card formcard">
     <div class="field"><label>작업 구분</label>
-      <div class="seg wrap" data-seg="type">
+      <div class="seg segwrap" data-seg="type">
         ${Object.entries(TYPES).map(([k,v])=>`<button type="button" data-v="${k}" class="${l.type===k?"on":""}">${v.label}</button>`).join("")}
       </div><input type="hidden" name="type" value="${esc(l.type)}"></div>
 
@@ -2951,11 +2953,16 @@ function openLogForm(id, preset){
       const etc = seg.querySelector('button[data-v="ETC"]');
       if(etc) etc.classList.add("on");
       form.type.value = "ETC";
+      // PM 이 자동으로 넣어둔 제목은 더 이상 맞지 않는다
+      if(form.title.value.trim() === "Planned Maintenance") form.title.value = "";
       syncConditional();
     }
   }
   function onTargetChange(){
     syncTypeChoices();
+    // 병원에서 자동으로 채워졌던 장비 모델은 병원 외 일정에 맞지 않으므로 비운다
+    if(form.schedMode && form.schedMode.value === "pers"
+       && form.systemModel.value && form.systemModel.value === hospSysModel(form.hospitalId.value)) form.systemModel.value = "";
     updateSysDatalist(curHid()); updatePrepHint();
     const m = hospSysModel(curHid()); if(m) form.systemModel.value = m;
     acrAutoEvalAll(); acrRefreshEvalUI();  // 3T 여부에 따라 PIU·대조도 기준 갱신
