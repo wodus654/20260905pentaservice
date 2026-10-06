@@ -1174,14 +1174,35 @@ function schedTargetOpts(sel){
     .map(([v,l])=>`<option value="p:${v}" ${sel==="p:"+v?"selected":""}>${esc(l)}</option>`).join("");
   return `${hosp?`<optgroup label="병원">${hosp}</optgroup>`:""}<optgroup label="병원 외 일정">${pers}</optgroup>`;
 }
-function scheduleForDate(d){ return store.schedule.filter(s=>s.date===d).sort((a,b)=>(a.createdAt||"").localeCompare(b.createdAt||"")); }
-async function addSchedule(target, date, type, note){
+// 일정은 하루짜리가 기본이고, endDate 가 있으면 date~endDate 며칠에 걸친다.
+// 날짜가 YYYY-MM-DD 라 문자열 비교만으로 범위 판정이 된다.
+function schedEnd(s){ return s.endDate && s.endDate > s.date ? s.endDate : s.date; }
+function schedSpan(s){
+  const e = schedEnd(s);
+  if(e === s.date) return 1;
+  return Math.max(1, Math.round((new Date(e+"T00:00:00") - new Date(s.date+"T00:00:00"))/86400000) + 1);
+}
+function schedDayNo(s, d){
+  return Math.round((new Date(d+"T00:00:00") - new Date(s.date+"T00:00:00"))/86400000) + 1;
+}
+function schedRangeText(s){
+  const e = schedEnd(s);
+  return e === s.date ? fmtDate(s.date) : `${fmtDate(s.date)} ~ ${fmtDate(e)} (${schedSpan(s)}일)`;
+}
+// endDate 가 시작일 이하면 하루짜리로 본다 — 빈 값으로 눕혀 저장한다.
+function normEndDate(date, endDate){ const e=(endDate||"").trim(); return (e && e > date) ? e : ""; }
+function scheduleForDate(d){
+  return store.schedule.filter(s=> d >= s.date && d <= schedEnd(s))
+    .sort((a,b)=>(a.createdAt||"").localeCompare(b.createdAt||""));
+}
+async function addSchedule(target, date, type, note, endDate){
   const personalKind = String(target||"").startsWith("p:") ? String(target).slice(2) : "";
   const hospitalId = personalKind ? "" : target;
   const h = personalKind ? null : hospById(hospitalId);
   await saveDoc("schedule", { hospitalId, personalKind,
     hospitalName: h ? h.name : (personalKind ? personalSchedInfo(personalKind)[1] : ""),
-    date, type: personalKind ? "ETC" : (type||"ETC"), note:(note||"").trim(), createdAt:new Date().toISOString() });
+    date, endDate: normEndDate(date, endDate),
+    type: personalKind ? "ETC" : (type||"ETC"), note:(note||"").trim(), createdAt:new Date().toISOString() });
 }
 async function delSchedule(id){ await deleteDoc("schedule", id); }
 // 표시된 달의 병원별 다가오는 PM·ACR 예정을 날짜별로 묶는다
@@ -1448,9 +1469,14 @@ function calendarHtml(){
     // 예정(빨강)을 맨 위에, 그 아래 미완료(주황), 완료(회청)는 맨 아래.
     const items = [
       ...due.map(x=>({name:(x.kind==="PM"?"PM·":"ACR·")+x.hname, cls: x.kind==="PM"?"cal-pm":"cal-acr"})),
-      ...sched.map(s=>({
-        name: isPersonalSched(s) ? schedTargetLabel(s)+(s.note?` · ${s.note}`:"") : (s.hospitalName||"—")+" (예정)",
-        cls: schedTagCls(s)})),
+      ...sched.map(s=>{
+        // 며칠에 걸친 일정은 매일 찍되 몇째 날인지 붙여 한눈에 이어지는 걸 알 수 있게 한다
+        const span = schedSpan(s);
+        const seq = span > 1 ? ` (${schedDayNo(s, ds)}/${span})` : "";
+        return { name: (isPersonalSched(s) ? schedTargetLabel(s)+(s.note?` · ${s.note}`:"")
+                                           : (s.hospitalName||"—")+" (예정)") + seq,
+                 cls: schedTagCls(s) };
+      }),
       ...logged.map(([name,st])=>({name: st!=="done" ? `${name} (${CAL_OPEN_LABEL[st]||"미완료"})` : name,
         cls: st!=="done" ? "cal-open" : "cal-log"})),
     ];
@@ -3221,8 +3247,11 @@ function dayDetailHtml(dateStr){
         // 병원 외 일정은 구분(PM/수리…)이 의미가 없어 분류 이름만 칩으로 보여준다.
         const chip = personal ? `<span class="chip muted">${esc(schedTargetLabel(s))}</span>`
                               : `<span class="chip ${t[2]}">${esc(t[1])}</span> ${esc(s.hospitalName)}`;
-        return `<div class="mini"><span class="mtext" data-action="edit-schedule" data-id="${s.id}" style="cursor:pointer">${chip}${s.note?` — ${esc(s.note)}`:""}</span>
-          ${(canLog() && !personal) ? `<button type="button" class="btn sm primary" data-action="new-log" data-hid="${s.hospitalId}" data-date="${s.date}" data-type="${s.type}" data-note="${esc(s.note||"")}" data-schedule-id="${s.id}">일지 작성</button>` : ""}
+        // 며칠짜리면 전체 기간과 오늘이 몇째 날인지 같이 보여준다
+        const span = schedSpan(s);
+        const range = span > 1 ? ` <span class="hint2">${esc(schedRangeText(s))} · ${schedDayNo(s, dateStr)}일째</span>` : "";
+        return `<div class="mini"><span class="mtext" data-action="edit-schedule" data-id="${s.id}" style="cursor:pointer">${chip}${s.note?` — ${esc(s.note)}`:""}${range}</span>
+          ${(canLog() && !personal) ? `<button type="button" class="btn sm primary" data-action="new-log" data-hid="${s.hospitalId}" data-date="${dateStr}" data-type="${s.type}" data-note="${esc(s.note||"")}" data-schedule-id="${s.id}">일지 작성</button>` : ""}
           <button type="button" class="prepx" data-action="del-schedule" data-id="${s.id}" data-date="${dateStr}" aria-label="삭제">×</button></div>`;
       }).join("") : `<div class="empty" style="padding:10px 0">등록된 일정이 없습니다.</div>`}
       ${sched.length && canEdit() ? `<div class="hint">일정을 눌러 수정할 수 있습니다.</div>` : ""}
@@ -3233,6 +3262,8 @@ function dayDetailHtml(dateStr){
         <select name="target" data-sched-target required>${schedTargetOpts("")}</select></div>
       <div class="field" data-sched-typefield><label>구분</label>
         <select name="type">${SCHEDULE_TYPE_OPTS.map(([v,l])=>`<option value="${v}">${esc(l)}</option>`).join("")}</select></div>
+      <div class="field"><label>종료일 <span class="hint2">여러 날에 걸칠 때만</span></label>
+        <input type="date" name="endDate" min="${esc(addDaysStr(dateStr,1))}"></div>
       <div class="field"><label>메모</label><input name="note" placeholder="예: 오전 방문 예정"></div>
       <button type="submit" class="btn primary">일정 추가</button>
     </form>
@@ -3248,7 +3279,11 @@ function openScheduleEdit(id){
   openPanel(`
     <form class="card formcard" id="schededit">
       <h3>일정 수정</h3>
-      <div class="field"><label>날짜</label><input type="date" name="date" value="${esc(s.date)}" required></div>
+      <div class="grid2">
+        <div class="field"><label>시작일</label><input type="date" name="date" value="${esc(s.date)}" required></div>
+        <div class="field"><label>종료일 <span class="hint2">여러 날이면</span></label>
+          <input type="date" name="endDate" value="${esc(s.endDate&&s.endDate>s.date?s.endDate:"")}"></div>
+      </div>
       <div class="field"><label>대상</label>
         <select name="target" data-sched-target required>${schedTargetOpts(curTarget)}</select></div>
       <div class="field" data-sched-typefield ${isPersonalSched(s)?`hidden`:""}><label>구분</label>
@@ -3271,7 +3306,7 @@ function openScheduleEdit(id){
     await saveDoc("schedule", Object.assign({}, s, {
       hospitalId: personalKind ? "" : target, personalKind,
       hospitalName: h ? h.name : (personalKind ? personalSchedInfo(personalKind)[1] : ""),
-      date: fd.get("date"),
+      date: fd.get("date"), endDate: normEndDate(fd.get("date"), fd.get("endDate")),
       type: personalKind ? "ETC" : (fd.get("type")||"ETC"), note: (fd.get("note")||"").trim()
     }));
     toast("일정을 수정했습니다");
@@ -3479,7 +3514,7 @@ document.addEventListener("submit", e=>{
     const fd = new FormData(sf);
     const target = fd.get("target");
     if(!target){ toast("대상을 선택하세요"); return; }
-    addSchedule(target, sf.dataset.scheduleAdd, fd.get("type"), fd.get("note"));
+    addSchedule(target, sf.dataset.scheduleAdd, fd.get("type"), fd.get("note"), fd.get("endDate"));
     toast("일정이 추가되었습니다");
     openDay(sf.dataset.scheduleAdd);
     return; }
