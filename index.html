@@ -128,7 +128,7 @@ a{color:var(--accent)}
 
 .field{display:flex;flex-direction:column;gap:5px}
 /* display:flex 가 hidden 속성(UA의 display:none)을 이겨버린다 — 숨김은 항상 먹혀야 한다 */
-.field[hidden],[data-schedpick][hidden]{display:none}
+.field[hidden],[data-schedpick][hidden],.seg button[hidden]{display:none}
 .field label{font-size:12px;font-weight:600;color:var(--ink-2);letter-spacing:.02em;text-transform:uppercase}
 .field input,.field select,.field textarea{width:100%;padding:10px 12px;border:1px solid var(--border-strong);
   border-radius:10px;background:var(--surface);color:var(--ink)}
@@ -554,6 +554,8 @@ const ACR_FIGS = {
 "use strict";
 
 /* ============ constants ============ */
+// 병원이 있어야 의미가 있는 작업 구분 — 병원 외 일정(사무실·교육 등)에서는 고르지 못하게 숨긴다
+const HOSPITAL_ONLY_TYPES = ["PM","COLDHEAD","ACR","CALL"];
 const TYPES = {
   PM:       {label:"정기점검(PM)", cls:"pm"},
   REPAIR:   {label:"고장수리",     cls:"repair"},
@@ -2938,11 +2940,27 @@ function openLogForm(id, preset){
     const m = hospSysModel(curHid()); if(m) form.systemModel.value = m;
     if(form.type.value==="PM" && !form.title.value.trim()) form.title.value = "Planned Maintenance";
   }
+  // 병원 외 일정에는 PM·Cold Head·ACR·Call 이 있을 수 없으므로 아예 고르지 못하게 한다
+  function syncTypeChoices(){
+    const pers = form.schedMode && form.schedMode.value === "pers";
+    const seg = form.querySelector('[data-seg="type"]');
+    if(!seg) return;
+    seg.querySelectorAll("button").forEach(b=>{ b.hidden = pers && HOSPITAL_ONLY_TYPES.includes(b.dataset.v); });
+    if(pers && HOSPITAL_ONLY_TYPES.includes(form.type.value)){
+      seg.querySelectorAll("button").forEach(b=>b.classList.remove("on"));
+      const etc = seg.querySelector('button[data-v="ETC"]');
+      if(etc) etc.classList.add("on");
+      form.type.value = "ETC";
+      syncConditional();
+    }
+  }
   function onTargetChange(){
+    syncTypeChoices();
     updateSysDatalist(curHid()); updatePrepHint();
     const m = hospSysModel(curHid()); if(m) form.systemModel.value = m;
     acrAutoEvalAll(); acrRefreshEvalUI();  // 3T 여부에 따라 PIU·대조도 기준 갱신
   }
+  syncTypeChoices();
   form.hospitalId.addEventListener("change", onTargetChange);
   // 병원 ↔ 병원 외 토글은 전역 click 리스너가 먼저 처리하므로 그 뒤에 한 번 더 맞춘다
   form.querySelectorAll("[data-schedmode] button").forEach(b=>b.addEventListener("click", ()=>setTimeout(onTargetChange,0)));
