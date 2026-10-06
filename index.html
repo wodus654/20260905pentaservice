@@ -3,6 +3,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PENTA SERVICE</title>
 <!-- field service log for MRI engineers -->
+<!-- 홈 화면에 추가했을 때 회사 마크가 아이콘으로 쓰이도록.
+     iOS 는 manifest 의 icons 를 보지 않고 apple-touch-icon 만 쓰며 투명 배경을
+     검게 칠하므로, 아이콘 PNG 들은 흰 배경을 깔아 만들었다. -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png" type="image/png">
+<meta name="theme-color" content="#1660ee">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="PENTA SERVICE">
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
