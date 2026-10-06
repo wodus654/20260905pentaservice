@@ -127,6 +127,8 @@ a{color:var(--accent)}
 .chip.sample{background:var(--surface-2);color:var(--ink-3);border:1px dashed var(--border-strong)}
 
 .field{display:flex;flex-direction:column;gap:5px}
+/* display:flex 가 hidden 속성(UA의 display:none)을 이겨버린다 — 숨김은 항상 먹혀야 한다 */
+.field[hidden],[data-schedpick][hidden]{display:none}
 .field label{font-size:12px;font-weight:600;color:var(--ink-2);letter-spacing:.02em;text-transform:uppercase}
 .field input,.field select,.field textarea{width:100%;padding:10px 12px;border:1px solid var(--border-strong);
   border-radius:10px;background:var(--surface);color:var(--ink)}
@@ -1166,13 +1168,30 @@ function personalSchedInfo(v){ return PERSONAL_SCHED_OPTS.find(o=>o[0]===v) || P
 function isPersonalSched(s){ return !!(s && s.personalKind); }
 function schedTargetLabel(s){ return isPersonalSched(s) ? personalSchedInfo(s.personalKind)[1] : (s.hospitalName||"—"); }
 function schedTagCls(s){ return isPersonalSched(s) ? "cal-p-"+personalSchedInfo(s.personalKind)[0] : "cal-sched"; }
-// 일정 추가·수정 폼의 "대상" 드롭다운. 병원은 id 그대로, 병원 외 일정은 "p:분류" 로 구분한다.
-function schedTargetOpts(sel){
-  const hosp = store.hospitals.slice().sort(koSort)
-    .map(h=>`<option value="${h.id}" ${sel===h.id?"selected":""}>${esc(h.name)}</option>`).join("");
-  const pers = PERSONAL_SCHED_OPTS
-    .map(([v,l])=>`<option value="p:${v}" ${sel==="p:"+v?"selected":""}>${esc(l)}</option>`).join("");
-  return `${hosp?`<optgroup label="병원">${hosp}</optgroup>`:""}<optgroup label="병원 외 일정">${pers}</optgroup>`;
+// 일정 추가·수정 폼의 대상 선택. 병원 / 병원 외 일정을 먼저 고르고 그쪽 목록만 보여준다
+// — 병원 24곳에 분류까지 섞인 하나의 긴 드롭다운보다 고르기 쉽다.
+// sel 은 병원 id 또는 "p:분류", 저장할 때도 같은 형식으로 addSchedule 에 넘긴다.
+function schedTargetField(sel){
+  const personal = String(sel||"").startsWith("p:");
+  const hid = personal ? "" : String(sel||"");
+  const pk  = personal ? String(sel).slice(2) : "";
+  const hospOpts = store.hospitals.slice().sort(koSort)
+    .map(h=>`<option value="${h.id}" ${hid===h.id?"selected":""}>${esc(h.name)}</option>`).join("");
+  const persOpts = PERSONAL_SCHED_OPTS
+    .map(([v,l])=>`<option value="${v}" ${pk===v?"selected":""}>${esc(l)}</option>`).join("");
+  return `
+    <div class="field"><label>대상</label>
+      <div class="seg" data-schedmode>
+        <button type="button" data-v="hosp" class="${personal?"":"on"}">병원</button>
+        <button type="button" data-v="pers" class="${personal?"on":""}">병원 외 일정</button>
+      </div><input type="hidden" name="schedMode" value="${personal?"pers":"hosp"}"></div>
+    <div class="field" data-schedpick="hosp"${personal?" hidden":""}><label>병원</label>
+      <select name="hospitalId">${store.hospitals.length?hospOpts:`<option value="">병원을 먼저 등록하세요</option>`}</select></div>
+    <div class="field" data-schedpick="pers"${personal?"":" hidden"}><label>분류</label>
+      <select name="personalKind">${persOpts}</select></div>`;
+}
+function readSchedTarget(fd){
+  return fd.get("schedMode")==="pers" ? "p:"+(fd.get("personalKind")||"etc") : String(fd.get("hospitalId")||"");
 }
 // 일정은 하루짜리가 기본이고, endDate 가 있으면 date~endDate 며칠에 걸친다.
 // 날짜가 YYYY-MM-DD 라 문자열 비교만으로 범위 판정이 된다.
@@ -3258,8 +3277,7 @@ function dayDetailHtml(dateStr){
     </div>
     <form class="card formcard" data-schedule-add="${dateStr}">
       <h3>일정 추가</h3>
-      <div class="field"><label>대상</label>
-        <select name="target" data-sched-target required>${schedTargetOpts("")}</select></div>
+      ${schedTargetField("")}
       <div class="field" data-sched-typefield><label>구분</label>
         <select name="type">${SCHEDULE_TYPE_OPTS.map(([v,l])=>`<option value="${v}">${esc(l)}</option>`).join("")}</select></div>
       <div class="field"><label>종료일 <span class="hint2">여러 날에 걸칠 때만</span></label>
@@ -3284,8 +3302,7 @@ function openScheduleEdit(id){
         <div class="field"><label>종료일 <span class="hint2">여러 날이면</span></label>
           <input type="date" name="endDate" value="${esc(s.endDate&&s.endDate>s.date?s.endDate:"")}"></div>
       </div>
-      <div class="field"><label>대상</label>
-        <select name="target" data-sched-target required>${schedTargetOpts(curTarget)}</select></div>
+      ${schedTargetField(curTarget)}
       <div class="field" data-sched-typefield ${isPersonalSched(s)?`hidden`:""}><label>구분</label>
         <select name="type">${SCHEDULE_TYPE_OPTS.map(([v,l])=>`<option value="${v}" ${s.type===v?"selected":""}>${esc(l)}</option>`).join("")}</select></div>
       <div class="field"><label>메모</label><input name="note" value="${esc(s.note||"")}" placeholder="예: 오전 방문 예정"></div>
@@ -3300,7 +3317,7 @@ function openScheduleEdit(id){
   $("#schededit").addEventListener("submit", async e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
-    const target = String(fd.get("target")||"");
+    const target = readSchedTarget(fd);
     const personalKind = target.startsWith("p:") ? target.slice(2) : "";
     const h = personalKind ? null : hospById(target);
     await saveDoc("schedule", Object.assign({}, s, {
@@ -3482,16 +3499,27 @@ document.addEventListener("click", e=>{
   if(act==="edit-schedule") return openScheduleEdit(id);
   if(act==="del-schedule"){ delSchedule(id); openDay(a.dataset.date); return; }
 });
+// 일정 폼의 병원 / 병원 외 일정 전환 — 고른 쪽 목록만 남기고,
+// 병원 외 일정에는 PM·수리 같은 "구분"이 의미가 없어 그 칸도 숨긴다.
+document.addEventListener("click", e=>{
+  const b = e.target.closest("[data-schedmode] button");
+  if(!b) return;
+  const wrap = b.closest("[data-schedmode]"), form = b.closest("form");
+  if(!form) return;
+  wrap.querySelectorAll("button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");
+  const pers = b.dataset.v === "pers";
+  const mode = form.querySelector("input[name=schedMode]");
+  if(mode) mode.value = pers ? "pers" : "hosp";
+  const ph = form.querySelector('[data-schedpick="hosp"]'), pp = form.querySelector('[data-schedpick="pers"]');
+  if(ph) ph.hidden = pers;
+  if(pp) pp.hidden = !pers;
+  const tf = form.querySelector("[data-sched-typefield]");
+  if(tf) tf.hidden = pers;
+});
 document.addEventListener("change", e=>{
   const mj = e.target.closest("[data-cal-jump]");
   if(mj && mj.value){ calMonth = mj.value; render(); return; }
-  // 병원 외 일정에는 PM·수리 같은 구분이 의미가 없어 그 칸을 숨긴다
-  const st = e.target.closest("select[data-sched-target]");
-  if(st){
-    const tf = st.closest("form")?.querySelector("[data-sched-typefield]");
-    if(tf) tf.hidden = String(st.value||"").startsWith("p:");
-    return;
-  }
   const de = e.target.closest("input[data-due-edit]");
   if(de && de.value){ setDueOverride(de.dataset.hid, de.dataset.ovkey, de.value, de.dataset.back); return; }
 });
@@ -3512,7 +3540,7 @@ document.addEventListener("submit", e=>{
   if(sf){ e.preventDefault();
     if(!canEdit()){ toast("보기 전용 계정입니다 — 데이터를 수정할 수 없습니다"); return; }
     const fd = new FormData(sf);
-    const target = fd.get("target");
+    const target = readSchedTarget(fd);
     if(!target){ toast("대상을 선택하세요"); return; }
     addSchedule(target, sf.dataset.scheduleAdd, fd.get("type"), fd.get("note"), fd.get("endDate"));
     toast("일정이 추가되었습니다");
