@@ -1218,12 +1218,40 @@ async function addSchedule(target, date, type, note, endDate){
   const personalKind = String(target||"").startsWith("p:") ? String(target).slice(2) : "";
   const hospitalId = personalKind ? "" : target;
   const h = personalKind ? null : hospById(hospitalId);
-  await saveDoc("schedule", { hospitalId, personalKind,
+  const saved = await saveDoc("schedule", { hospitalId, personalKind,
     hospitalName: h ? h.name : (personalKind ? personalSchedInfo(personalKind)[1] : ""),
     date, endDate: normEndDate(date, endDate),
     type: personalKind ? "ETC" : (type||"ETC"), note:(note||"").trim(), createdAt:new Date().toISOString() });
+  await syncPersonalScheduleLog(saved);
 }
-async function delSchedule(id){ await deleteDoc("schedule", id); }
+async function delSchedule(id){ await removePersonalScheduleLog(id); await deleteDoc("schedule", id); }
+
+/* 병원 외 일정은 나중에 작업일지 탭에서 검색으로 찾을 수 있어야 해서,
+   일지를 따로 쓰지 않아도 되도록 일지 한 건을 자동으로 만들어 둔다.
+   사용자가 쓴 일지가 아니라 일정의 그림자라서 schedRef 로 묶어두고 일정과 같이
+   고치고 지운다. 일정 동작은 이미 권한 검사를 거쳤으므로 저수준 함수를 쓴다. */
+function autoLogForSchedule(scheduleId){ return store.logs.find(l=>l.schedRef===scheduleId); }
+async function syncPersonalScheduleLog(s){
+  if(!s || !s.id) return;
+  const existing = autoLogForSchedule(s.id);
+  // 병원 일정으로 바뀌었으면 자동 일지는 없앤다 — 진짜 일지는 사용자가 직접 쓴다
+  if(!isPersonalSched(s)){ if(existing) await deleteDocRaw("logs", existing.id); return; }
+  const kind = personalSchedInfo(s.personalKind)[1];
+  await writeDocRaw("logs", Object.assign({}, existing||{}, {
+    schedRef: s.id, personalKind: s.personalKind,
+    type: "ETC", status: "done", date: s.date,
+    hospitalId: "", hospitalName: kind,
+    title: (s.note||"").trim() || kind,
+    description: schedSpan(s) > 1 ? schedRangeText(s) : "",
+    engineer:"", systemModel:"", symptom:"", parts:"", followUp:"",
+    workStart:"", workEnd:"", heLevel:"", countsAsPm:false,
+    acr:[], acrFull:null, pm:[], deleted:false,
+  }));
+}
+async function removePersonalScheduleLog(scheduleId){
+  const l = autoLogForSchedule(scheduleId);
+  if(l) await deleteDocRaw("logs", l.id);
+}
 // 표시된 달의 병원별 다가오는 PM·ACR 예정을 날짜별로 묶는다
 let calAnimDir = 0; // -1 이전달, 1 다음달 — 다음 렌더에서 슬라이드 인 방향
 function calShift(delta){
@@ -1469,7 +1497,8 @@ function calendarHtml(){
   const dueMap = calendarDueMap();
   // 날짜 → Map(병원명 → 상태). 같은 날 같은 병원에 여러 건이면 안 끝난 쪽을 우선 표시한다.
   const logsMap = {};
-  store.logs.filter(l=>!l.deleted && l.date).forEach(l=>{
+  // schedRef 가 있는 일지는 병원 외 일정이 만든 그림자라서 일정 태그와 겹친다 — 달력에선 뺀다
+  store.logs.filter(l=>!l.deleted && l.date && !l.schedRef).forEach(l=>{
     const hname = hospById(l.hospitalId)?.name || l.hospitalName || "—";
     const m = (logsMap[l.date] = logsMap[l.date] || new Map());
     if(l.status && l.status !== "done") m.set(hname, l.status);
@@ -2095,7 +2124,7 @@ function logDetailBodyHtml(l, h, t, s, dur, forPrint){
     </div>
     <h3 style="text-transform:none;font-size:18px;color:var(--ink);letter-spacing:-.01em">${esc(l.title||typeLabel(l))}</h3>
     <div class="kvgrid">
-      <div class="kv"><span class="kk">병원</span><span class="vv">${(h && !forPrint)?`<button type="button" class="linklike" data-go="hospital?id=${h.id}">${esc(h.name)}</button>`:esc(h?h.name:l.hospitalName||"—")}</span></div>
+      <div class="kv"><span class="kk">${l.personalKind ? "대상" : "병원"}</span><span class="vv">${(h && !forPrint)?`<button type="button" class="linklike" data-go="hospital?id=${h.id}">${esc(h.name)}</button>`:esc(h?h.name:l.hospitalName||"—")}</span></div>
       ${l.type!=="CALL" ? `<div class="kv"><span class="kk">장비</span><span class="vv">${esc(l.systemModel||"—")}</span></div>
       <div class="kv"><span class="kk">담당 엔지니어</span><span class="vv">${esc(l.engineer||"—")}</span></div>
       <div class="kv"><span class="kk">소요 시간</span><span class="vv tnum">${(l.workStart&&l.workEnd)?`${esc(l.workStart)} ~ ${esc(l.workEnd)}${l.workEnd<l.workStart?" (다음날)":""}${dur!=null?` (${dur}분)`:""}`:(dur!=null?dur+"분":"—")}</span></div>` : ""}
@@ -2123,6 +2152,11 @@ function logDetailFullHtml(l){
   const h = hospById(l.hospitalId);
   const t = TYPES[l.type]||{label:l.type,cls:"muted"}; const s = STATUS[l.status];
   const dur = (l.workStart && l.workEnd) ? durationMin(l.workStart,l.workEnd) : (l.durationMin||null);
+  // 병원 외 일정이 자동으로 만든 일지 — 검색에만 쓰이므로 여기서 고치지 않고 일정에서 고친다
+  if(l.schedRef) return `
+    <div class="card formcard">${logDetailBodyHtml(l,h,t,s,dur,false)}</div>
+    <div class="hint" style="text-align:center">병원 외 일정에서 자동으로 만들어진 기록입니다. 내용을 바꾸려면 달력에서 그 일정을 수정하세요.</div>
+  `;
   return `
     <div class="card formcard">${logDetailBodyHtml(l,h,t,s,dur,false)}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -2466,7 +2500,8 @@ function openLogForm(id, preset){
   const l = editing ? Object.assign({}, editing) : {
     type: (p.type && TYPES[p.type]) ? p.type : "PM",
     date: p.date || todayStr(), status:"done",
-    hospitalId: p.hospitalId || local.get("lastHid","") || (store.hospitals[0]||{}).id || "",
+    hospitalId: p.personalKind ? "" : (p.hospitalId || local.get("lastHid","") || (store.hospitals[0]||{}).id || ""),
+    personalKind: p.personalKind || "",
     engineer: engineer,
     // 등록한 일정의 메모 — "기타" 일정은 메모가 곧 그 방문의 이름이라 제목으로,
     // 나머지(PM·고장수리 등)는 제목이 따로 있으므로 조치 내용으로 넣는다
@@ -2507,11 +2542,8 @@ function openLogForm(id, preset){
         <span class="hint">최종 수리되어 입고된 날짜</span></div>
     </div>
 
-    <div class="grid2">
-      <div class="field"><label>병원 *</label>
-        <select name="hospitalId" required>${store.hospitals.length?"":`<option value="">병원을 먼저 등록하세요</option>`}${hospOpts}</select></div>
-      <div class="field"><label>작업일 *</label><input type="date" name="date" value="${esc(l.date)}" required></div>
-    </div>
+    ${schedTargetField(l.personalKind ? "p:"+l.personalKind : l.hospitalId)}
+    <div class="field"><label>작업일 *</label><input type="date" name="date" value="${esc(l.date)}" required></div>
 
     <div class="grid2" data-when="${CALL_HIDDEN_TYPES}">
       <div class="field"><label>장비 (모델)</label><input list="sysmodels" name="systemModel" value="${esc(l.systemModel||"")}" placeholder="예: SIGNA HDxt 1.5T">
@@ -2787,7 +2819,7 @@ function openLogForm(id, preset){
     autoGrowVisibleTextareas(form);
   }
   renderAcrFull(); renderPm(); syncConditional();
-  updateSysDatalist(form.hospitalId.value);
+  updateSysDatalist(curHid());
 
   function syncPmField(el){
     const [i,fi] = el.dataset.pmf.split(".").map(Number);
@@ -2889,9 +2921,11 @@ function openLogForm(id, preset){
     const fullp = e.target.closest("[data-fullpending]");
     if(fullp){ const p = pending[+fullp.dataset.fullpending]; if(p) openLightbox(p.dataUri); return; }
   });
+  // 병원 외 일정(사무실·교육 등)이면 병원에 딸린 값들은 끌어오지 않는다
+  function curHid(){ return form.schedMode && form.schedMode.value==="pers" ? "" : form.hospitalId.value; }
   function updatePrepHint(){
     const box = $("#prepexisting"); if(!box) return;
-    const items = prepForHospital(form.hospitalId.value);
+    const items = curHid() ? prepForHospital(curHid()) : [];
     box.textContent = items.length ? "현재 이 병원 준비물: " + items.map(p=>p.text).join(", ") : "";
   }
   function hospSysModel(hid){
@@ -2901,14 +2935,17 @@ function openLogForm(id, preset){
   }
   updatePrepHint();
   if(!editing){
-    const m = hospSysModel(form.hospitalId.value); if(m) form.systemModel.value = m;
+    const m = hospSysModel(curHid()); if(m) form.systemModel.value = m;
     if(form.type.value==="PM" && !form.title.value.trim()) form.title.value = "Planned Maintenance";
   }
-  form.hospitalId.addEventListener("change", ()=>{
-    updateSysDatalist(form.hospitalId.value); updatePrepHint();
-    const m = hospSysModel(form.hospitalId.value); if(m) form.systemModel.value = m;
+  function onTargetChange(){
+    updateSysDatalist(curHid()); updatePrepHint();
+    const m = hospSysModel(curHid()); if(m) form.systemModel.value = m;
     acrAutoEvalAll(); acrRefreshEvalUI();  // 3T 여부에 따라 PIU·대조도 기준 갱신
-  });
+  }
+  form.hospitalId.addEventListener("change", onTargetChange);
+  // 병원 ↔ 병원 외 토글은 전역 click 리스너가 먼저 처리하므로 그 뒤에 한 번 더 맞춘다
+  form.querySelectorAll("[data-schedmode] button").forEach(b=>b.addEventListener("click", ()=>setTimeout(onTargetChange,0)));
 
   form.addEventListener("submit", async e=>{
     e.preventDefault();
@@ -2916,7 +2953,11 @@ function openLogForm(id, preset){
     const obj = editing ? Object.assign({}, editing) : {};
     ["type","acrKind","contractType","coldheadPos","coldheadSerial","coldheadInDate","hospitalId","date","systemModel","engineer","title","symptom","description","parts","workStart","workEnd","heLevel","status","followUp"]
       .forEach(k=> obj[k] = (fd.get(k)||"").toString().trim());
-    if(!obj.hospitalId){ toast("병원을 선택하세요"); return; }
+    // 대상은 병원 또는 병원 외 분류(사무실·교육 등) 하나 — 병원이 아니면 hospitalId 를 비운다
+    const tgt = readSchedTarget(fd);
+    obj.personalKind = tgt.startsWith("p:") ? tgt.slice(2) : "";
+    obj.hospitalId = obj.personalKind ? "" : tgt;
+    if(!obj.hospitalId && !obj.personalKind){ toast("대상을 선택하세요"); return; }
     if(obj.type!=="ACR") obj.acrKind = "";
     if(obj.type!=="PM") obj.contractType = "";
     if(obj.type!=="COLDHEAD"){ obj.coldheadPos = ""; obj.coldheadSerial = ""; obj.coldheadInDate = ""; }
@@ -2927,7 +2968,7 @@ function openLogForm(id, preset){
       obj.status = "done";
     }
     obj.countsAsPm = (obj.type!=="PM" && obj.type!=="CALL") ? !!fd.get("countsAsPm") : false;
-    obj.hospitalName = hospById(obj.hospitalId)?.name || "";
+    obj.hospitalName = hospById(obj.hospitalId)?.name || (obj.personalKind ? personalSchedInfo(obj.personalKind)[1] : "");
     const tRe = /^([01]?\d|2[0-3]):[0-5]\d$/;
     if(tRe.test(obj.workStart) && tRe.test(obj.workEnd)) obj.durationMin = durationMin(obj.workStart,obj.workEnd);
     else delete obj.durationMin;
@@ -2947,11 +2988,12 @@ function openLogForm(id, preset){
     }) : [];
     delete obj.sample;
     if(photoBusy>0){ toast("사진 처리가 끝난 뒤 저장하세요"); return; }
-    local.set("lastHid", obj.hospitalId);
+    if(obj.hospitalId) local.set("lastHid", obj.hospitalId);
     if(obj.engineer){ engineer = obj.engineer; local.set("engineer", engineer); }
     const saved = await saveDoc("logs", obj);
     await clearStaleOverrides(saved);
-    if(fromScheduleId) await deleteDocRaw("schedule", fromScheduleId);
+    // 일정을 보고 일지를 썼으면 그 일정은 처리된 것 — 일정이 만들어둔 자동 일지도 같이 치운다
+    if(fromScheduleId){ await removePersonalScheduleLog(fromScheduleId); await deleteDocRaw("schedule", fromScheduleId); }
     const canPhoto = PHOTO_TYPES.includes(saved.type);
     if(!canPhoto && pending.length) toast("사진은 정기점검·고장수리·Cold Head에만 저장됩니다");
     // 삭제된 기존 사진
@@ -3231,7 +3273,8 @@ function bindPopDrag(el, onClose){
 function dayDetailHtml(dateStr){
   const sched = scheduleForDate(dateStr);
   const due = calendarDueMap()[dateStr] || [];
-  const dayLogs = store.logs.filter(l=>!l.deleted && l.date===dateStr).sort(byDateDesc);
+  // 자동 생성된 일지(schedRef)는 바로 위 "등록한 일정"에 이미 나오므로 중복 표시하지 않는다
+  const dayLogs = store.logs.filter(l=>!l.deleted && l.date===dateStr && !l.schedRef).sort(byDateDesc);
   return `
     <div class="card formcard">
       <h3>작성된 일지 (${dayLogs.length})</h3>
@@ -3270,7 +3313,7 @@ function dayDetailHtml(dateStr){
         const span = schedSpan(s);
         const range = span > 1 ? ` <span class="hint2">${esc(schedRangeText(s))} · ${schedDayNo(s, dateStr)}일째</span>` : "";
         return `<div class="mini"><span class="mtext" data-action="edit-schedule" data-id="${s.id}" style="cursor:pointer">${chip}${s.note?` — ${esc(s.note)}`:""}${range}</span>
-          ${(canLog() && !personal) ? `<button type="button" class="btn sm primary" data-action="new-log" data-hid="${s.hospitalId}" data-date="${dateStr}" data-type="${s.type}" data-note="${esc(s.note||"")}" data-schedule-id="${s.id}">일지 작성</button>` : ""}
+          ${canLog() ? `<button type="button" class="btn sm primary" data-action="new-log" data-hid="${s.hospitalId||""}" data-pkind="${esc(s.personalKind||"")}" data-date="${dateStr}" data-type="${s.type}" data-note="${esc(s.note||"")}" data-schedule-id="${s.id}">일지 작성</button>` : ""}
           <button type="button" class="prepx" data-action="del-schedule" data-id="${s.id}" data-date="${dateStr}" aria-label="삭제">×</button></div>`;
       }).join("") : `<div class="empty" style="padding:10px 0">등록된 일정이 없습니다.</div>`}
       ${sched.length && canEdit() ? `<div class="hint">일정을 눌러 수정할 수 있습니다.</div>` : ""}
@@ -3308,7 +3351,7 @@ function openScheduleEdit(id){
       <div class="field"><label>메모</label><input name="note" value="${esc(s.note||"")}" placeholder="예: 오전 방문 예정"></div>
       <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
         <button type="submit" class="btn primary" style="flex:1">저장</button>
-        ${(canLog() && !isPersonalSched(s)) ? `<button type="button" class="btn" data-action="new-log" data-hid="${s.hospitalId}" data-date="${s.date}" data-type="${s.type}" data-note="${esc(s.note||"")}" data-schedule-id="${s.id}">작업일지 작성</button>` : ""}
+        ${canLog() ? `<button type="button" class="btn" data-action="new-log" data-hid="${s.hospitalId||""}" data-pkind="${esc(s.personalKind||"")}" data-date="${s.date}" data-type="${s.type}" data-note="${esc(s.note||"")}" data-schedule-id="${s.id}">작업일지 작성</button>` : ""}
         <button type="button" class="btn danger" data-action="del-schedule" data-id="${s.id}" data-date="${backDate}">삭제</button>
       </div>
     </form>
@@ -3325,6 +3368,10 @@ function openScheduleEdit(id){
       hospitalName: h ? h.name : (personalKind ? personalSchedInfo(personalKind)[1] : ""),
       date: fd.get("date"), endDate: normEndDate(fd.get("date"), fd.get("endDate")),
       type: personalKind ? "ETC" : (fd.get("type")||"ETC"), note: (fd.get("note")||"").trim()
+    }));
+    await syncPersonalScheduleLog(Object.assign({}, s, {
+      id: s.id, personalKind, date: fd.get("date"),
+      endDate: normEndDate(fd.get("date"), fd.get("endDate")), note: (fd.get("note")||"").trim()
     }));
     toast("일정을 수정했습니다");
     openDay(fd.get("date"));
@@ -3442,7 +3489,7 @@ document.addEventListener("click", e=>{
   if(act==="logout"){ closePanel(); logout(); return; }
   if(act==="new-log"){
     // 팝업이 지워지면 a도 같이 사라지므로 preset을 먼저 읽어둔다
-    const preset = { hospitalId:a.dataset.hid, date:a.dataset.date, type:a.dataset.type, note:a.dataset.note, scheduleId:a.dataset.scheduleId };
+    const preset = { hospitalId:a.dataset.hid, personalKind:a.dataset.pkind||"", date:a.dataset.date, type:a.dataset.type, note:a.dataset.note, scheduleId:a.dataset.scheduleId };
     if($("#logpop") || $("#daypop")) return closePopupsThen(()=>openLogForm(null, preset));
     return openLogForm(null, preset); }
   // 일지 상세는 어디서 눌러도 팝업으로 본다(목록·달력 팝업·병원 상세 모두)
