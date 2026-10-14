@@ -3326,7 +3326,13 @@ async function gcalSync(silent){
   if(gcalBusy) return false;
   gcalBusy = true;
   try{
-    if(!await gcalAuth(silent)){ if(!silent) toast("Google 로그인에 실패했습니다"); return false; }
+    if(!await gcalAuth(silent)){
+      if(!silent){
+        await gcalSaveCfg({ lastError: "Google 로그인 실패 — 클라이언트 ID와 승인된 자바스크립트 원본(" + location.origin + ")을 확인하세요" });
+        toast("Google 로그인에 실패했습니다");
+      }
+      return false;
+    }
     const calId = await gcalEnsureCalendar();
     const list = store.schedule.slice();
     for(const s of list) await gcalPushOne(calId, s);
@@ -3359,7 +3365,7 @@ function gcalSettingsHtml(){
     휴대폰에 그 Google 계정이 등록돼 있는 한 삼성 캘린더에 그대로 나타나고 가족 공유도 됩니다.</p>
     <div class="field"><label>Google 클라이언트 ID</label>
       <input name="clientId" value="${esc(cfg.clientId||"")}" placeholder="000000-xxxx.apps.googleusercontent.com" autocapitalize="off" spellcheck="false">
-      <span class="hint">Google Cloud 콘솔에서 발급받은 웹 애플리케이션용 OAuth 클라이언트 ID입니다. 발급 방법은 아래를 보세요.</span></div>
+      <span class="hint"><b>.apps.googleusercontent.com</b> 으로 끝나는 값입니다. 사이트 주소(${esc(location.origin)})를 여기에 넣는 것이 아닙니다 — 그 주소는 Google Cloud 쪽 "승인된 자바스크립트 원본"에 넣습니다. 발급 방법은 아래를 보세요.</span></div>
     <div class="field"><label>캘린더 ID <span class="hint2">비우면 앱이 전용 캘린더를 새로 만듭니다</span></label>
       <input name="calendarId" value="${esc(cfg.calendarId||"")}" placeholder="xxxxx@group.calendar.google.com" autocapitalize="off" spellcheck="false">
       <span class="hint">이미 만들어 둔 공유 캘린더로 보내려면 그 캘린더의 ID를 넣으세요. Google 캘린더 → 캘린더 설정 → "캘린더 통합"에 있습니다. 공유 주소나 삽입 코드를 통째로 붙여넣어도 ID만 알아서 뽑아냅니다. <b>iCal 형식 주소는 읽기 전용이라 여기엔 쓸 수 없습니다.</b></span></div>
@@ -3435,6 +3441,11 @@ function openSettings(){
     const fd = new FormData(e.target);
     const clientId = (fd.get("clientId")||"").toString().trim();
     const enabled = !!fd.get("enabled");
+    // 흔한 실수: 승인된 자바스크립트 원본(사이트 주소)을 여기에 붙여넣는다. 조용히 넘기지 않는다.
+    if(clientId && !/.apps.googleusercontent.com$/.test(clientId)){
+      toast("클라이언트 ID 형식이 아닙니다 — .apps.googleusercontent.com 으로 끝나는 값을 넣으세요");
+      return;
+    }
     const typed = gcalParseCalendarId(fd.get("calendarId"));
     const prev = gcalCfg();
     const patch = { clientId, enabled };
