@@ -3283,25 +3283,68 @@ async function gcalEnsureCalendar(){
   await gcalSaveCfg({ calendarId: made.id });
   return made.id;
 }
-// 일정 → Google 이벤트. 종일 일정이고, 종료일은 하루 뒤(배타적)로 보내야 한다.
-function gcalEventBody(s){
-  const personal = isPersonalSched(s);
-  const who = personal ? schedTargetLabel(s) : (s.hospitalName || "—");
-  const kind = personal ? "" : scheduleTypeInfo(s.type)[1];
-  const summary = personal ? (s.note ? `${who} · ${s.note}` : who)
-                           : `${kind}·${who}` + (s.note ? ` — ${s.note}` : "");
+/* 달력에 보이는 것을 그대로 Google 로 보낸다 — 등록한 일정뿐 아니라
+   PM·ACR 예정일과 작성된 작업일지까지. sid 는 종류별로 접두사를 붙여 겹치지 않게 한다.
+   예정일은 병원·종류당 하나(sid 에 날짜를 넣지 않는다)라서 날짜가 바뀌어도
+   같은 이벤트가 갱신될 뿐 찌꺼기가 남지 않는다. */
+function gcalItems(){
+  const cfg = gcalCfg();
+  const out = [];
+  for(const s of store.schedule){
+    if(!s.date) continue;
+    const personal = isPersonalSched(s);
+    const who = personal ? schedTargetLabel(s) : (s.hospitalName || "—");
+    const kind = personal ? "" : scheduleTypeInfo(s.type)[1];
+    out.push({
+      sid: s.id, date: s.date, end: addDaysStr(schedEnd(s), 1),
+      summary: personal ? (s.note ? `${who} · ${s.note}` : who)
+                        : `${kind}·${who}` + (s.note ? ` — ${s.note}` : ""),
+      desc: s.note || "",
+    });
+  }
+  if(cfg.sendDue !== false){
+    const map = calendarDueMap();
+    for(const date of Object.keys(map)){
+      for(const x of map[date]){
+        out.push({
+          sid: "due_" + x.hid + "_" + x.kind,
+          date, end: addDaysStr(date, 1),
+          summary: (x.label || x.kind) + "·" + x.hname + " (예정)",
+          desc: "앱이 자동으로 계산한 예정일입니다.",
+        });
+      }
+    }
+  }
+  if(cfg.sendLogs !== false){
+    for(const l of store.logs){
+      if(l.deleted || !l.date) continue;
+      const h = hospById(l.hospitalId);
+      const who = h ? h.name : (l.hospitalName || "—");
+      out.push({
+        sid: "log_" + l.id, date: l.date, end: addDaysStr(l.date, 1),
+        summary: typeLabel(l) + "·" + who + (l.title ? ` — ${l.title}` : ""),
+        desc: (l.description || ""),
+      });
+    }
+  }
+  return out;
+}
+// 종일 일정이고, 종료일은 하루 뒤(배타적)로 보내야 한다.
+function gcalEventBody(it){
   return {
-    id: gcalEventId(s.id),
-    summary,
-    description: (s.note||"") + "\n\nPENTA SERVICE 에서 자동으로 보낸 일정입니다.",
-    start: { date: s.date },
-    end:   { date: addDaysStr(schedEnd(s), 1) },
-    extendedProperties: { private: { app:"pentaservice", sid: s.id } },
+    id: gcalEventId(it.sid),
+    summary: it.summary,
+    description: (it.desc ? it.desc + "\n\n" : "") + "PENTA SERVICE 에서 자동으로 보낸 일정입니다.",
+    start: { date: it.date },
+    end:   { date: it.end },
+    extendedProperties: { private: { app:"pentaservice", sid: it.sid } },
     source: { title:"PENTA SERVICE", url: location.origin + location.pathname },
   };
 }
-async function gcalPushOne(calId, s){
-  const body = gcalEventBody(s);
+// 같은 내용을 매번 다시 올리지 않으려고 내용 해시를 설정에 남겨둔다(수백 건이라 차이가 크다).
+function gcalHash(str){ let h = 0; for(let i=0;i<str.length;i++) h = (h*31 + str.charCodeAt(i))|0; return h.toString(36); }
+async function gcalPushOne(calId, it){
+  const body = gcalEventBody(it);
   const path = "/calendars/" + encodeURIComponent(calId) + "/events";
   try {
     await gcalFetch(path + "/" + body.id, { method:"PUT", body: JSON.stringify(body) });
@@ -3314,11 +3357,11 @@ async function gcalPushOne(calId, s){
     } else throw e;
   }
 }
-// 앱에서 지워진 일정의 이벤트는 Google 쪽에서도 지운다.
+// 앱에서 지워진 항목의 이벤트는 Google 쪽에서도 지운다. liveIds 가 비어 있으면 전부 지운다.
 async function gcalPruneDeleted(calId, liveIds){
   let pageToken = "", removed = 0;
   do {
-    const q = "/calendars/" + encodeURIComponent(calId) + "/events?maxResults=250"
+    const q = "/calendars/" + encodeURIComponent(calId) + "/events?maxResults=250&showDeleted=false"
             + "&privateExtendedProperty=" + encodeURIComponent("app=pentaservice")
             + (pageToken ? "&pageToken=" + pageToken : "");
     const page = await gcalFetch(q);
@@ -3332,6 +3375,19 @@ async function gcalPruneDeleted(calId, liveIds){
     pageToken = page.nextPageToken || "";
   } while(pageToken);
   return removed;
+}
+// 지금 쓰는 캘린더 말고 다른 캘린더에 남아 있는 우리 일정을 모두 거둬들인다.
+// 캘린더를 바꾸기 전에 보낸 것들이 남는 경우를 위한 청소 기능이다.
+async function gcalCleanupOthers(){
+  const cur = gcalCfg().calendarId || "";
+  const cals = await gcalListWritable();
+  let total = 0, hit = [];
+  for(const c of cals){
+    if(c.id === cur) continue;
+    const n = await gcalPruneDeleted(c.id, new Set());
+    if(n){ total += n; hit.push(`${c.name} ${n}건`); }
+  }
+  return { total, hit };
 }
 /* 전체 동기화. silent=true 면 사용자에게 창을 띄우지 않고, 이미 받아둔 권한이 있을 때만 돈다. */
 async function gcalSync(silent){
@@ -3348,11 +3404,26 @@ async function gcalSync(silent){
       return false;
     }
     const calId = await gcalEnsureCalendar();
-    const list = store.schedule.slice();
-    for(const s of list) await gcalPushOne(calId, s);
-    const removed = await gcalPruneDeleted(calId, new Set(list.map(s=>s.id)));
-    await gcalSaveCfg({ lastSync: new Date().toISOString(), lastError: "" });
-    if(!silent) toast(`Google 캘린더로 ${list.length}건 보냈습니다${removed?` (${removed}건 삭제)`:""}`);
+    const items = gcalItems();
+    const sent = Object.assign({}, cfg.sent || {});
+    // 캘린더를 바꿨으면 예전 해시는 쓸모없다 — 전부 다시 올린다.
+    if(cfg.sentCal !== calId) for(const k of Object.keys(sent)) delete sent[k];
+    let pushed = 0, done = 0;
+    for(const it of items){
+      const h = gcalHash(JSON.stringify(gcalEventBody(it)));
+      if(sent[it.sid] !== h){
+        await gcalPushOne(calId, it);
+        sent[it.sid] = h;
+        pushed++;
+      }
+      done++;
+      if(!silent && pushed && pushed % 25 === 0) toast(`보내는 중… ${done}/${items.length}`);
+    }
+    const liveIds = new Set(items.map(x=>x.sid));
+    const removed = await gcalPruneDeleted(calId, liveIds);
+    for(const k of Object.keys(sent)) if(!liveIds.has(k)) delete sent[k];
+    await gcalSaveCfg({ lastSync: new Date().toISOString(), lastError: "", sent, sentCal: calId });
+    if(!silent) toast(`완료 — 전체 ${items.length}건 중 ${pushed}건 올림${removed?`, ${removed}건 삭제`:""}`);
     return true;
   }catch(e){
     await gcalSaveCfg({ lastError: String(e.message||e) });
@@ -3370,6 +3441,21 @@ function gcalPushSoon(){
 /* ---- settings ---- */
 // 캘린더를 이름으로 고르게 한다. ID만 손으로 넣다 보면 엉뚱한 캘린더(개인 일정 등)로
 // 들어가는 사고가 나는데, 그걸 눈으로 확인하고 고르면 막을 수 있다.
+// 지금 쓰는 캘린더 말고 다른 곳에 남은 우리 일정을 거둬들인다(캘린더를 바꾸기 전에 보낸 것들).
+async function gcalRunCleanup(){
+  const box = $("#gcalcallist");
+  if(box) box.innerHTML = `<div class="hint" style="padding:6px 0">다른 캘린더를 살펴보는 중…</div>`;
+  try{
+    const r = await gcalCleanupOthers();
+    const msg = r.total ? `건 거둬들였습니다 — ` : "다른 캘린더에는 남은 일정이 없습니다";
+    if(box) box.innerHTML = `<div class="hint" style="padding:6px 0">${esc(msg)}</div>`;
+    toast(msg);
+  }catch(e){
+    const m = "정리 실패: " + (e.message||e);
+    if(box) box.innerHTML = `<div class="hint" style="padding:6px 0;color:var(--crit)">${esc(m)}</div>`;
+    toast(m);
+  }
+}
 async function gcalShowPicker(){
   const box = $("#gcalcallist");
   if(!box) return;
@@ -3400,10 +3486,13 @@ function gcalSettingsHtml(){
       <div style="display:flex;gap:8px;margin-top:6px"><button type="button" class="btn sm" data-action="gcal-pick">내 캘린더에서 고르기</button></div>
       <div id="gcalcallist"></div>
       <span class="hint">이미 만들어 둔 공유 캘린더로 보내려면 그 캘린더의 ID를 넣으세요. Google 캘린더 → 캘린더 설정 → "캘린더 통합"에 있습니다. 공유 주소나 삽입 코드를 통째로 붙여넣어도 ID만 알아서 뽑아냅니다. <b>iCal 형식 주소는 읽기 전용이라 여기엔 쓸 수 없습니다.</b></span></div>
+    <label class="pmcheckrow"><input type="checkbox" name="sendDue" ${cfg.sendDue!==false?"checked":""}><span>PM·ACR 예정일도 보내기</span></label>
+    <label class="pmcheckrow"><input type="checkbox" name="sendLogs" ${cfg.sendLogs!==false?"checked":""}><span>작성된 작업일지도 보내기</span></label>
     <label class="pmcheckrow"><input type="checkbox" name="enabled" ${on?"checked":""}><span>Google 캘린더로 일정 보내기 사용</span></label>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
       <button type="submit" class="btn primary" style="flex:1">저장</button>
       <button type="button" class="btn" data-action="gcal-sync">지금 동기화</button>
+      <button type="button" class="btn sm" data-action="gcal-cleanup">다른 캘린더에 남은 일정 정리</button>
       ${cfg.calendarId?`<button type="button" class="btn sm" data-action="gcal-open">Google에서 열기</button>`:""}
     </div>
     <span class="hint">마지막 동기화: ${esc(last)}${cfg.lastError?` · 마지막 오류: ${esc(cfg.lastError)}`:""}</span>
@@ -3481,7 +3570,7 @@ function openSettings(){
     }
     const typed = gcalParseCalendarId(fd.get("calendarId"));
     const prev = gcalCfg();
-    const patch = { clientId, enabled };
+    const patch = { clientId, enabled, sendDue: !!fd.get("sendDue"), sendLogs: !!fd.get("sendLogs") };
     if(typed !== (prev.calendarId||"")){ patch.calendarId = typed; patch.calendarPinned = !!typed; }
     await gcalSaveCfg(patch);
     toast("저장되었습니다");
@@ -3842,6 +3931,7 @@ document.addEventListener("click", e=>{
     return; }
   if(act==="export"){ const list = currentLogList(); return exportCsv(list); }
   if(act==="gcal-pick"){ gcalShowPicker(); return; }
+  if(act==="gcal-cleanup"){ gcalRunCleanup(); return; }
   if(act==="gcal-sync"){ gcalSync(false); return; }
   if(act==="gcal-open"){ window.open("https://calendar.google.com/calendar/r", "_blank"); return; }
   if(act==="export-all") return exportCsv(store.logs.filter(l=>!l.deleted), "전체");
