@@ -3241,7 +3241,12 @@ async function gcalFetch(path, opts){
   }
   return body;
 }
-// 전용 캘린더를 찾거나 새로 만든다 — 사용자의 기본 캘린더를 건드리지 않기 위해서다.
+// 붙여넣은 값에서 클라이언트 ID 하나만 뽑아낸다. 휴대폰에서 두 번 붙여넣어져
+// 같은 값이 연달아 들어가는 일이 잦아서, 끝부분만 보면 그대로 통과해버린다.
+function gcalParseClientId(raw){
+  const m = String(raw||"").match(/\d+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com/);
+  return m ? m[0] : "";
+}
 // 붙여넣은 값에서 캘린더 ID만 뽑아낸다 — 공유 주소나 삽입 코드를 통째로 넣어도 되게.
 function gcalParseCalendarId(raw){
   let v = String(raw||"").trim();
@@ -3251,6 +3256,7 @@ function gcalParseCalendarId(raw){
   try { v = decodeURIComponent(v); } catch(e){}
   return v.trim();
 }
+// 전용 캘린더를 찾거나 새로 만든다 — 사용자의 기본 캘린더를 건드리지 않기 위해서다.
 async function gcalEnsureCalendar(){
   const cfg = gcalCfg();
   if(cfg.calendarId){
@@ -3439,11 +3445,13 @@ function openSettings(){
   if(gf) gf.addEventListener("submit", async e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
-    const clientId = (fd.get("clientId")||"").toString().trim();
+    const rawClient = (fd.get("clientId")||"").toString().trim();
+    const clientId = gcalParseClientId(rawClient);
     const enabled = !!fd.get("enabled");
-    // 흔한 실수: 승인된 자바스크립트 원본(사이트 주소)을 여기에 붙여넣는다. 조용히 넘기지 않는다.
-    if(clientId && !/.apps.googleusercontent.com$/.test(clientId)){
-      toast("클라이언트 ID 형식이 아닙니다 — .apps.googleusercontent.com 으로 끝나는 값을 넣으세요");
+    // 흔한 실수 두 가지: 사이트 주소를 넣거나, 휴대폰에서 같은 값이 두 번 붙여넣어진다.
+    // 끝부분만 검사하면 두 번 들어간 값이 그대로 통과하므로 ID 하나만 뽑아 쓴다.
+    if(rawClient && !clientId){
+      toast("클라이언트 ID 형식이 아닙니다 — 000000-xxxx.apps.googleusercontent.com 형태의 값을 넣으세요");
       return;
     }
     const typed = gcalParseCalendarId(fd.get("calendarId"));
