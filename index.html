@@ -3262,8 +3262,9 @@ async function gcalEnsureCalendar(){
   if(cfg.calendarId){
     try { await gcalFetch("/calendars/" + encodeURIComponent(cfg.calendarId)); return cfg.calendarId; }
     catch(e){
-      // 사용자가 직접 지정한 캘린더면 말없이 새로 만들지 않는다 — 주소나 권한 문제를 알려야 한다
-      if(cfg.calendarPinned) throw new Error("지정한 캘린더를 열 수 없습니다. 캘린더 ID가 맞는지, 로그인한 Google 계정에 그 캘린더의 변경 권한이 있는지 확인하세요.");
+      // 사용자가 직접 지정한 캘린더면 말없이 새로 만들지 않는다 — 진짜 사유를 그대로 보여준다.
+      // (여기서 메시지를 뭉개면 "API 사용 설정 안 됨" 같은 원인이 가려진다)
+      if(cfg.calendarPinned) throw new Error(`지정한 캘린더를 열 수 없습니다 [${e.status||"?"}] ${e.message||e}`);
       if(e.status !== 404) throw e;   // 지워졌으면 아래에서 다시 만든다
     }
   }
