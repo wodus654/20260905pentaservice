@@ -3242,11 +3242,24 @@ async function gcalFetch(path, opts){
   return body;
 }
 // 전용 캘린더를 찾거나 새로 만든다 — 사용자의 기본 캘린더를 건드리지 않기 위해서다.
+// 붙여넣은 값에서 캘린더 ID만 뽑아낸다 — 공유 주소나 삽입 코드를 통째로 넣어도 되게.
+function gcalParseCalendarId(raw){
+  let v = String(raw||"").trim();
+  if(!v) return "";
+  const m = v.match(/[?&]src=([^&"'\s>]+)/);
+  if(m) v = m[1];
+  try { v = decodeURIComponent(v); } catch(e){}
+  return v.trim();
+}
 async function gcalEnsureCalendar(){
   const cfg = gcalCfg();
   if(cfg.calendarId){
     try { await gcalFetch("/calendars/" + encodeURIComponent(cfg.calendarId)); return cfg.calendarId; }
-    catch(e){ if(e.status !== 404) throw e; }   // 지워졌으면 아래에서 다시 만든다
+    catch(e){
+      // 사용자가 직접 지정한 캘린더면 말없이 새로 만들지 않는다 — 주소나 권한 문제를 알려야 한다
+      if(cfg.calendarPinned) throw new Error("지정한 캘린더를 열 수 없습니다. 캘린더 ID가 맞는지, 로그인한 Google 계정에 그 캘린더의 변경 권한이 있는지 확인하세요.");
+      if(e.status !== 404) throw e;   // 지워졌으면 아래에서 다시 만든다
+    }
   }
   const list = await gcalFetch("/users/me/calendarList");
   const found = (list.items||[]).find(c=>c.summary === GCAL_CAL_SUMMARY);
@@ -3347,6 +3360,9 @@ function gcalSettingsHtml(){
     <div class="field"><label>Google 클라이언트 ID</label>
       <input name="clientId" value="${esc(cfg.clientId||"")}" placeholder="000000-xxxx.apps.googleusercontent.com" autocapitalize="off" spellcheck="false">
       <span class="hint">Google Cloud 콘솔에서 발급받은 웹 애플리케이션용 OAuth 클라이언트 ID입니다. 발급 방법은 아래를 보세요.</span></div>
+    <div class="field"><label>캘린더 ID <span class="hint2">비우면 앱이 전용 캘린더를 새로 만듭니다</span></label>
+      <input name="calendarId" value="${esc(cfg.calendarId||"")}" placeholder="xxxxx@group.calendar.google.com" autocapitalize="off" spellcheck="false">
+      <span class="hint">이미 만들어 둔 공유 캘린더로 보내려면 그 캘린더의 ID를 넣으세요. Google 캘린더 → 캘린더 설정 → "캘린더 통합"에 있습니다. 공유 주소나 삽입 코드를 통째로 붙여넣어도 ID만 알아서 뽑아냅니다. <b>iCal 형식 주소는 읽기 전용이라 여기엔 쓸 수 없습니다.</b></span></div>
     <label class="pmcheckrow"><input type="checkbox" name="enabled" ${on?"checked":""}><span>Google 캘린더로 일정 보내기 사용</span></label>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
       <button type="submit" class="btn primary" style="flex:1">저장</button>
@@ -3419,7 +3435,11 @@ function openSettings(){
     const fd = new FormData(e.target);
     const clientId = (fd.get("clientId")||"").toString().trim();
     const enabled = !!fd.get("enabled");
-    await gcalSaveCfg({ clientId, enabled });
+    const typed = gcalParseCalendarId(fd.get("calendarId"));
+    const prev = gcalCfg();
+    const patch = { clientId, enabled };
+    if(typed !== (prev.calendarId||"")){ patch.calendarId = typed; patch.calendarPinned = !!typed; }
+    await gcalSaveCfg(patch);
     toast("저장되었습니다");
     // 켠 직후에는 바로 한 번 맞춰준다(이때 Google 로그인 창이 뜬다)
     if(enabled && clientId) gcalSync(false);
