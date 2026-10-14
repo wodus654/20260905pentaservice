@@ -3256,6 +3256,13 @@ function gcalParseCalendarId(raw){
   try { v = decodeURIComponent(v); } catch(e){}
   return v.trim();
 }
+// 쓰기 가능한 내 캘린더 목록. ID를 손으로 맞추면 엉뚱한 캘린더로 들어가기 쉬워서,
+// 이름을 보고 고를 수 있게 한다.
+async function gcalListWritable(){
+  if(!await gcalAuth(false)) throw new Error("Google 로그인이 필요합니다");
+  const list = await gcalFetch("/users/me/calendarList?minAccessRole=writer&maxResults=250");
+  return (list.items||[]).map(c=>({ id:c.id, name:c.summary||c.id, primary:!!c.primary }));
+}
 // 전용 캘린더를 찾거나 새로 만든다 — 사용자의 기본 캘린더를 건드리지 않기 위해서다.
 async function gcalEnsureCalendar(){
   const cfg = gcalCfg();
@@ -3361,6 +3368,21 @@ function gcalPushSoon(){
   window.__gcalTimer = setTimeout(()=>{ gcalSync(true); }, 1200);
 }
 /* ---- settings ---- */
+// 캘린더를 이름으로 고르게 한다. ID만 손으로 넣다 보면 엉뚱한 캘린더(개인 일정 등)로
+// 들어가는 사고가 나는데, 그걸 눈으로 확인하고 고르면 막을 수 있다.
+async function gcalShowPicker(){
+  const box = $("#gcalcallist");
+  if(!box) return;
+  box.innerHTML = `<div class="hint" style="padding:6px 0">캘린더 목록을 불러오는 중…</div>`;
+  let cals;
+  try { cals = await gcalListWritable(); }
+  catch(e){ box.innerHTML = `<div class="hint" style="padding:6px 0;color:var(--crit)">목록을 불러오지 못했습니다 — ${esc(String(e.message||e))}</div>`; return; }
+  if(!cals.length){ box.innerHTML = `<div class="hint" style="padding:6px 0">쓸 수 있는 캘린더가 없습니다.</div>`; return; }
+  const cur = gcalCfg().calendarId || "";
+  box.innerHTML = `<div class="hint" style="padding:6px 0 2px">일정을 보낼 캘린더를 고르세요. 개인 일정이 들어 있는 캘린더는 피하는 게 좋습니다.</div>`
+    + cals.map(c=>`<button type="button" class="btn sm" style="display:block;width:100%;text-align:left;margin-top:4px"
+        data-gcal-pickid="${esc(c.id)}">${c.id===cur?"✓ ":""}${esc(c.name)}${c.primary?" (기본 캘린더)":""}</button>`).join("");
+}
 function gcalSettingsHtml(){
   if(!canEdit()) return "";
   const cfg = gcalCfg();
@@ -3375,6 +3397,8 @@ function gcalSettingsHtml(){
       <span class="hint"><b>.apps.googleusercontent.com</b> 으로 끝나는 값입니다. 사이트 주소(${esc(location.origin)})를 여기에 넣는 것이 아닙니다 — 그 주소는 Google Cloud 쪽 "승인된 자바스크립트 원본"에 넣습니다. 발급 방법은 아래를 보세요.</span></div>
     <div class="field"><label>캘린더 ID <span class="hint2">비우면 앱이 전용 캘린더를 새로 만듭니다</span></label>
       <input name="calendarId" value="${esc(cfg.calendarId||"")}" placeholder="xxxxx@group.calendar.google.com" autocapitalize="off" spellcheck="false">
+      <div style="display:flex;gap:8px;margin-top:6px"><button type="button" class="btn sm" data-action="gcal-pick">내 캘린더에서 고르기</button></div>
+      <div id="gcalcallist"></div>
       <span class="hint">이미 만들어 둔 공유 캘린더로 보내려면 그 캘린더의 ID를 넣으세요. Google 캘린더 → 캘린더 설정 → "캘린더 통합"에 있습니다. 공유 주소나 삽입 코드를 통째로 붙여넣어도 ID만 알아서 뽑아냅니다. <b>iCal 형식 주소는 읽기 전용이라 여기엔 쓸 수 없습니다.</b></span></div>
     <label class="pmcheckrow"><input type="checkbox" name="enabled" ${on?"checked":""}><span>Google 캘린더로 일정 보내기 사용</span></label>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
@@ -3817,6 +3841,7 @@ document.addEventListener("click", e=>{
     confirmDialog("이 병원과 관련 설정을 삭제할까요? (작업일지는 남습니다)", ()=>{ deleteDoc("hospitals", id); closePanel(); });
     return; }
   if(act==="export"){ const list = currentLogList(); return exportCsv(list); }
+  if(act==="gcal-pick"){ gcalShowPicker(); return; }
   if(act==="gcal-sync"){ gcalSync(false); return; }
   if(act==="gcal-open"){ window.open("https://calendar.google.com/calendar/r", "_blank"); return; }
   if(act==="export-all") return exportCsv(store.logs.filter(l=>!l.deleted), "전체");
@@ -3845,6 +3870,26 @@ document.addEventListener("click", e=>{
   if(act==="open-day") return openDay(a.dataset.date);
   if(act==="edit-schedule") return openScheduleEdit(id);
   if(act==="del-schedule"){ delSchedule(id); openDay(a.dataset.date); return; }
+});
+// 캘린더 목록에서 하나를 고르면 그 자리에서 설정에 반영한다.
+document.addEventListener("click", async e=>{
+  const b = e.target.closest("[data-gcal-pickid]");
+  if(!b) return;
+  const id = b.dataset.gcalPickid;
+  const prev = gcalCfg().calendarId || "";
+  // 캘린더를 바꾸면 이전 캘린더에 뿌려둔 우리 일정은 거둬들인다.
+  // app=pentaservice 표시가 붙은 것만 지우므로 사용자의 원래 일정은 건드리지 않는다.
+  if(prev && prev !== id){
+    b.disabled = true;
+    try { const n = await gcalPruneDeleted(prev, new Set()); if(n) toast(`이전 캘린더에서 건 거둬들였습니다`); }
+    catch(err){ toast("이전 캘린더 정리 실패: " + (err.message||err)); }
+    b.disabled = false;
+  }
+  await gcalSaveCfg({ calendarId: id, calendarPinned: true, lastError: "" });
+  const inp = document.querySelector("#gcalform input[name=calendarId]");
+  if(inp) inp.value = id;
+  toast("보낼 캘린더를 바꿨습니다 — 지금 동기화를 누르세요");
+  gcalShowPicker();
 });
 // 일정 폼의 병원 / 병원 외 일정 전환 — 고른 쪽 목록만 남기고,
 // 병원 외 일정에는 PM·수리 같은 "구분"이 의미가 없어 그 칸도 숨긴다.
