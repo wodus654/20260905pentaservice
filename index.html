@@ -958,7 +958,7 @@ const ICONS = {
 /* ============ state ============ */
 let db = null;
 let dbState = "connecting"; // connecting | ready | offline
-const store = { hospitals:[], logs:[], photos:[], prep:[], schedule:[] };
+const store = { hospitals:[], logs:[], photos:[], prep:[], schedule:[], gcal:[] };
 // 한국시간(KST, UTC+9) 기준 "YYYY-MM-DD" — 기기 시간대와 무관하게 항상 한국 날짜.
 // (toISOString()은 UTC 기준이라 KST 자정~오전 9시 사이에는 어제 날짜가 나오는 문제가 있었음)
 const _kstFmt = new Intl.DateTimeFormat("en-CA", { timeZone:"Asia/Seoul", year:"numeric", month:"2-digit", day:"2-digit" });
@@ -1117,6 +1117,7 @@ async function initDb(){
   bind("photos");
   bind("prep");
   bind("schedule");
+  bind("gcal");
   render();
 }
 
@@ -1238,8 +1239,9 @@ async function addSchedule(target, date, type, note, endDate){
     date, endDate: normEndDate(date, endDate),
     type: personalKind ? "ETC" : (type||"ETC"), note:(note||"").trim(), createdAt:new Date().toISOString() });
   await syncPersonalScheduleLog(saved);
+  gcalPushSoon();
 }
-async function delSchedule(id){ await removePersonalScheduleLog(id); await deleteDoc("schedule", id); }
+async function delSchedule(id){ await removePersonalScheduleLog(id); await deleteDoc("schedule", id); gcalPushSoon(); }
 
 /* 병원 외 일정은 나중에 작업일지 탭에서 검색으로 찾을 수 있어야 해서,
    일지를 따로 쓰지 않아도 되도록 일지 한 건을 자동으로 만들어 둔다.
@@ -3160,7 +3162,214 @@ function openHospitalForm(id){
   });
 }
 
+
+/* ============ Google 캘린더 내보내기 ============
+   삼성 캘린더는 외부 앱이 쓸 수 있는 공개 API가 없다. 대신 휴대폰에 등록된
+   Google 계정의 캘린더를 그대로 보여주므로, 여기서 Google 캘린더에 일정을 써넣으면
+   삼성 캘린더에도 나타나고 가족 공유도 Google 쪽 공유 기능으로 하면 된다.
+
+   - 설정은 gcal 컬렉션의 단일 문서(cfg)에 둬서 기기 간에 공유된다.
+   - 일정 하나당 Google 이벤트 하나. 이벤트 id 를 일정 id 에서 결정론적으로 만들어
+     (아래 gcalEventId) 몇 번을 다시 보내도 중복이 생기지 않는다.
+   - 브라우저 토큰은 1시간짜리라, 앱이 닫혀 있는 동안은 동기화되지 않는다.
+     앱을 열어두거나 일정을 고칠 때마다 밀어 넣는 방식이다.
+*/
+const GCAL_SCOPE = "https://www.googleapis.com/auth/calendar";
+const GCAL_CAL_SUMMARY = "PENTA SERVICE 일정";
+let gcalToken = null, gcalTokenExp = 0, gcalClient = null, gcalBusy = false;
+
+function gcalCfg(){ return store.gcal.find(x=>x.id==="cfg") || {}; }
+async function gcalSaveCfg(patch){
+  await writeDocRaw("gcal", Object.assign({id:"cfg"}, gcalCfg(), patch));
+}
+// Google 이벤트 id 는 [a-v0-9] 만 쓸 수 있다. 일정 id 를 16진수로 바꿔 안전하게 만든다.
+function gcalEventId(scheduleId){
+  let out = "ps";
+  for(const ch of String(scheduleId)) out += ch.charCodeAt(0).toString(16).padStart(2,"0");
+  return out;
+}
+function gcalLoadScript(){
+  if(window.google && google.accounts && google.accounts.oauth2) return Promise.resolve(true);
+  if(window.__gcalScript) return window.__gcalScript;
+  window.__gcalScript = new Promise(res=>{
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload = ()=>res(!!(window.google && google.accounts && google.accounts.oauth2));
+    s.onerror = ()=>res(false);
+    document.head.appendChild(s);
+    setTimeout(()=>res(!!(window.google && google.accounts && google.accounts.oauth2)), 8000);
+  });
+  return window.__gcalScript;
+}
+function gcalTokenValid(){ return gcalToken && Date.now() < gcalTokenExp - 60000; }
+// silent=true 면 이미 허용해둔 경우에만 조용히 토큰을 갱신하고, 아니면 그냥 포기한다.
+function gcalAuth(silent){
+  return new Promise(async (resolve)=>{
+    if(gcalTokenValid()) return resolve(true);
+    const cfg = gcalCfg();
+    if(!cfg.clientId) return resolve(false);
+    if(!await gcalLoadScript()) return resolve(false);
+    try{
+      gcalClient = google.accounts.oauth2.initTokenClient({
+        client_id: cfg.clientId,
+        scope: GCAL_SCOPE,
+        callback: (resp)=>{
+          if(resp && resp.access_token){
+            gcalToken = resp.access_token;
+            gcalTokenExp = Date.now() + (Number(resp.expires_in||3600) * 1000);
+            resolve(true);
+          } else resolve(false);
+        },
+        error_callback: ()=>resolve(false),
+      });
+      gcalClient.requestAccessToken({ prompt: silent ? "" : "consent" });
+    }catch(e){ resolve(false); }
+  });
+}
+async function gcalFetch(path, opts){
+  opts = opts || {};
+  const res = await fetch("https://www.googleapis.com/calendar/v3" + path, Object.assign({}, opts, {
+    headers: Object.assign({ "Authorization": "Bearer " + gcalToken, "Content-Type": "application/json" }, opts.headers||{}),
+  }));
+  if(res.status === 204) return {};
+  const body = await res.json().catch(()=>({}));
+  if(!res.ok){
+    const err = new Error((body.error && body.error.message) || ("HTTP " + res.status));
+    err.status = res.status;
+    throw err;
+  }
+  return body;
+}
+// 전용 캘린더를 찾거나 새로 만든다 — 사용자의 기본 캘린더를 건드리지 않기 위해서다.
+async function gcalEnsureCalendar(){
+  const cfg = gcalCfg();
+  if(cfg.calendarId){
+    try { await gcalFetch("/calendars/" + encodeURIComponent(cfg.calendarId)); return cfg.calendarId; }
+    catch(e){ if(e.status !== 404) throw e; }   // 지워졌으면 아래에서 다시 만든다
+  }
+  const list = await gcalFetch("/users/me/calendarList");
+  const found = (list.items||[]).find(c=>c.summary === GCAL_CAL_SUMMARY);
+  if(found){ await gcalSaveCfg({ calendarId: found.id }); return found.id; }
+  const made = await gcalFetch("/calendars", { method:"POST",
+    body: JSON.stringify({ summary: GCAL_CAL_SUMMARY, description:"PENTA SERVICE 앱에서 자동으로 보낸 일정", timeZone:"Asia/Seoul" }) });
+  await gcalSaveCfg({ calendarId: made.id });
+  return made.id;
+}
+// 일정 → Google 이벤트. 종일 일정이고, 종료일은 하루 뒤(배타적)로 보내야 한다.
+function gcalEventBody(s){
+  const personal = isPersonalSched(s);
+  const who = personal ? schedTargetLabel(s) : (s.hospitalName || "—");
+  const kind = personal ? "" : scheduleTypeInfo(s.type)[1];
+  const summary = personal ? (s.note ? `${who} · ${s.note}` : who)
+                           : `${kind}·${who}` + (s.note ? ` — ${s.note}` : "");
+  return {
+    id: gcalEventId(s.id),
+    summary,
+    description: (s.note||"") + "\n\nPENTA SERVICE 에서 자동으로 보낸 일정입니다.",
+    start: { date: s.date },
+    end:   { date: addDaysStr(schedEnd(s), 1) },
+    extendedProperties: { private: { app:"pentaservice", sid: s.id } },
+    source: { title:"PENTA SERVICE", url: location.origin + location.pathname },
+  };
+}
+async function gcalPushOne(calId, s){
+  const body = gcalEventBody(s);
+  const path = "/calendars/" + encodeURIComponent(calId) + "/events";
+  try {
+    await gcalFetch(path + "/" + body.id, { method:"PUT", body: JSON.stringify(body) });
+  } catch(e){
+    if(e.status === 404 || e.status === 410){
+      await gcalFetch(path, { method:"POST", body: JSON.stringify(body) });
+    } else if(e.status === 409){
+      // 같은 id 가 취소 상태로 남아 있는 경우 — 되살린다
+      await gcalFetch(path + "/" + body.id, { method:"PUT", body: JSON.stringify(Object.assign({}, body, {status:"confirmed"})) });
+    } else throw e;
+  }
+}
+// 앱에서 지워진 일정의 이벤트는 Google 쪽에서도 지운다.
+async function gcalPruneDeleted(calId, liveIds){
+  let pageToken = "", removed = 0;
+  do {
+    const q = "/calendars/" + encodeURIComponent(calId) + "/events?maxResults=250"
+            + "&privateExtendedProperty=" + encodeURIComponent("app=pentaservice")
+            + (pageToken ? "&pageToken=" + pageToken : "");
+    const page = await gcalFetch(q);
+    for(const ev of (page.items||[])){
+      const sid = ev.extendedProperties && ev.extendedProperties.private && ev.extendedProperties.private.sid;
+      if(sid && !liveIds.has(sid)){
+        try { await gcalFetch("/calendars/" + encodeURIComponent(calId) + "/events/" + ev.id, { method:"DELETE" }); removed++; }
+        catch(e){ if(e.status !== 404 && e.status !== 410) throw e; }
+      }
+    }
+    pageToken = page.nextPageToken || "";
+  } while(pageToken);
+  return removed;
+}
+/* 전체 동기화. silent=true 면 사용자에게 창을 띄우지 않고, 이미 받아둔 권한이 있을 때만 돈다. */
+async function gcalSync(silent){
+  const cfg = gcalCfg();
+  if(!cfg.enabled || !cfg.clientId) return false;
+  if(gcalBusy) return false;
+  gcalBusy = true;
+  try{
+    if(!await gcalAuth(silent)){ if(!silent) toast("Google 로그인에 실패했습니다"); return false; }
+    const calId = await gcalEnsureCalendar();
+    const list = store.schedule.slice();
+    for(const s of list) await gcalPushOne(calId, s);
+    const removed = await gcalPruneDeleted(calId, new Set(list.map(s=>s.id)));
+    await gcalSaveCfg({ lastSync: new Date().toISOString(), lastError: "" });
+    if(!silent) toast(`Google 캘린더로 ${list.length}건 보냈습니다${removed?` (${removed}건 삭제)`:""}`);
+    return true;
+  }catch(e){
+    await gcalSaveCfg({ lastError: String(e.message||e) });
+    if(!silent) toast("동기화 실패: " + (e.message||e));
+    return false;
+  }finally{ gcalBusy = false; }
+}
+// 일정을 고칠 때마다 조용히 밀어 넣는다 — 토큰이 살아 있을 때만이라 사용자를 방해하지 않는다.
+function gcalPushSoon(){
+  const cfg = gcalCfg();
+  if(!cfg.enabled || !cfg.clientId || !gcalTokenValid()) return;
+  clearTimeout(window.__gcalTimer);
+  window.__gcalTimer = setTimeout(()=>{ gcalSync(true); }, 1200);
+}
 /* ---- settings ---- */
+function gcalSettingsHtml(){
+  if(!canEdit()) return "";
+  const cfg = gcalCfg();
+  const on = !!cfg.enabled && !!cfg.clientId;
+  const last = cfg.lastSync ? new Date(cfg.lastSync).toLocaleString("ko-KR") : "아직 보낸 적 없음";
+  return `<form id="gcalform" class="card formcard">
+    <h3>Google 캘린더로 내보내기</h3>
+    <p class="hint" style="margin:0 0 4px">삼성 캘린더는 외부 앱이 직접 쓸 수 없습니다. 대신 Google 캘린더에 "${esc(GCAL_CAL_SUMMARY)}" 캘린더를 만들어 일정을 보내면,
+    휴대폰에 그 Google 계정이 등록돼 있는 한 삼성 캘린더에 그대로 나타나고 가족 공유도 됩니다.</p>
+    <div class="field"><label>Google 클라이언트 ID</label>
+      <input name="clientId" value="${esc(cfg.clientId||"")}" placeholder="000000-xxxx.apps.googleusercontent.com" autocapitalize="off" spellcheck="false">
+      <span class="hint">Google Cloud 콘솔에서 발급받은 웹 애플리케이션용 OAuth 클라이언트 ID입니다. 발급 방법은 아래를 보세요.</span></div>
+    <label class="pmcheckrow"><input type="checkbox" name="enabled" ${on?"checked":""}><span>Google 캘린더로 일정 보내기 사용</span></label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+      <button type="submit" class="btn primary" style="flex:1">저장</button>
+      <button type="button" class="btn" data-action="gcal-sync">지금 동기화</button>
+      ${cfg.calendarId?`<button type="button" class="btn sm" data-action="gcal-open">Google에서 열기</button>`:""}
+    </div>
+    <span class="hint">마지막 동기화: ${esc(last)}${cfg.lastError?` · 마지막 오류: ${esc(cfg.lastError)}`:""}</span>
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer;font-weight:600;font-size:13px">클라이언트 ID 발급 방법</summary>
+      <ol style="font-size:13px;color:var(--ink-2);padding-left:18px;line-height:1.7">
+        <li>console.cloud.google.com 에 접속해 프로젝트를 하나 만듭니다.</li>
+        <li>"API 및 서비스 → 라이브러리"에서 <b>Google Calendar API</b>를 사용 설정합니다.</li>
+        <li>"OAuth 동의 화면"을 외부(External)로 만들고, 테스트 사용자에 본인 Gmail 주소를 추가합니다.</li>
+        <li>"사용자 인증 정보 → 사용자 인증 정보 만들기 → OAuth 클라이언트 ID"에서 유형을 <b>웹 애플리케이션</b>으로 고릅니다.</li>
+        <li><b>승인된 자바스크립트 원본</b>에 <code>${esc(location.origin)}</code> 를 넣습니다. (리디렉션 URI는 비워둬도 됩니다)</li>
+        <li>만들어진 클라이언트 ID를 위 칸에 붙여넣고 저장한 뒤 "지금 동기화"를 누릅니다.</li>
+      </ol>
+    </details>
+    <span class="hint">이 기능은 웹 주소(${esc(location.host||"GitHub Pages")})에서만 동작합니다 — Artifact 화면에서는 Google 로그인 창을 띄울 수 없습니다.</span>
+    <span class="hint">브라우저에서 받는 Google 권한은 1시간짜리라, 앱을 닫아둔 동안에는 자동으로 보내지지 않습니다.
+    앱을 열어 둔 상태에서 일정을 고치면 바로 반영되고, 그렇지 않으면 다음에 앱을 열고 "지금 동기화"를 누르면 한 번에 맞춰집니다.</span>
+  </form>`;
+}
 function openSettings(){
   openPanel(`<div class="card formcard">
     <div class="field"><label>로그인 계정</label>
@@ -3184,6 +3393,7 @@ function openSettings(){
     </div>
     <button type="submit" class="btn primary">저장</button>
   </form>
+  ${gcalSettingsHtml()}
   <div class="card formcard">
     <h3>일정 자동 계산 규칙</h3>
     <p style="font-size:13.5px;color:var(--ink-2)">· PM: 최근 PM 일지일 + 병원별 주기(기본 2개월)<br>
@@ -3202,6 +3412,17 @@ function openSettings(){
     engineer = new FormData(e.target).get("engineer").trim();
     local.set("engineer", engineer);
     toast("저장되었습니다"); closePanel();
+  });
+  const gf = $("#gcalform");
+  if(gf) gf.addEventListener("submit", async e=>{
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const clientId = (fd.get("clientId")||"").toString().trim();
+    const enabled = !!fd.get("enabled");
+    await gcalSaveCfg({ clientId, enabled });
+    toast("저장되었습니다");
+    // 켠 직후에는 바로 한 번 맞춰준다(이때 Google 로그인 창이 뜬다)
+    if(enabled && clientId) gcalSync(false);
   });
 }
 function getUserLabel(){ return "이 기기 설정으로 저장됩니다"; }
@@ -3409,6 +3630,7 @@ function openScheduleEdit(id){
       id: s.id, personalKind, date: fd.get("date"),
       endDate: normEndDate(fd.get("date"), fd.get("endDate")), note: (fd.get("note")||"").trim()
     }));
+    gcalPushSoon();
     toast("일정을 수정했습니다");
     openDay(fd.get("date"));
   });
@@ -3555,6 +3777,8 @@ document.addEventListener("click", e=>{
     confirmDialog("이 병원과 관련 설정을 삭제할까요? (작업일지는 남습니다)", ()=>{ deleteDoc("hospitals", id); closePanel(); });
     return; }
   if(act==="export"){ const list = currentLogList(); return exportCsv(list); }
+  if(act==="gcal-sync"){ gcalSync(false); return; }
+  if(act==="gcal-open"){ window.open("https://calendar.google.com/calendar/r", "_blank"); return; }
   if(act==="export-all") return exportCsv(store.logs.filter(l=>!l.deleted), "전체");
   if(act==="clear-samples"){ confirmDialog("예시 병원·일지를 모두 삭제할까요?", clearSamples); return; }
   if(act==="open-trash") return openTrash();
