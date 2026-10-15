@@ -3207,7 +3207,15 @@ function gcalLoadScript(){
   return window.__gcalScript;
 }
 function gcalTokenValid(){ return gcalToken && Date.now() < gcalTokenExp - 60000; }
-// silent=true 면 이미 허용해둔 경우에만 조용히 토큰을 갱신하고, 아니면 그냥 포기한다.
+// 토큰을 기기에 남겨 앱을 다시 열어도 그대로 쓴다. Google 토큰 갱신은 반드시 팝업을
+// 띄우기 때문에(prompt:"" 라도 창이 깜빡인다), 저장해두지 않으면 열 때마다 창이 뜬다.
+function gcalLoadToken(){
+  const t = local.get("gcalTok", null);
+  if(t && t.t && Date.now() < t.e - 60000){ gcalToken = t.t; gcalTokenExp = t.e; return true; }
+  return false;
+}
+function gcalSaveToken(){ local.set("gcalTok", { t: gcalToken, e: gcalTokenExp }); }
+// 팝업이 뜨는 동작이라 사용자가 직접 누른 경우에만 부른다.
 function gcalAuth(silent){
   return new Promise(async (resolve)=>{
     if(gcalTokenValid()) return resolve(true);
@@ -3222,12 +3230,14 @@ function gcalAuth(silent){
           if(resp && resp.access_token){
             gcalToken = resp.access_token;
             gcalTokenExp = Date.now() + (Number(resp.expires_in||3600) * 1000);
+            gcalSaveToken();
             resolve(true);
           } else resolve(false);
         },
         error_callback: ()=>resolve(false),
       });
-      gcalClient.requestAccessToken({ prompt: silent ? "" : "consent" });
+      // prompt:"" 는 "필요할 때만 동의 화면" — 이미 허용해둔 계정이면 창이 금방 닫힌다.
+      gcalClient.requestAccessToken({ prompt: "" });
     }catch(e){ resolve(false); }
   });
 }
@@ -3400,7 +3410,9 @@ async function gcalSync(silent){
   if(gcalBusy) return false;
   gcalBusy = true;
   try{
-    if(!await gcalAuth(silent)){
+    // 자동 동기화는 있는 토큰으로만 — 없으면 팝업을 띄우지 않고 조용히 물러난다.
+    const ok = silent ? gcalEnsureToken() : await gcalAuth(false);
+    if(!ok){
       if(!silent){
         await gcalSaveCfg({ lastError: "Google 로그인 실패 — 클라이언트 ID와 승인된 자바스크립트 원본(" + location.origin + ")을 확인하세요" });
         toast("Google 로그인에 실패했습니다");
@@ -3439,20 +3451,16 @@ async function gcalSync(silent){
    앱을 열었을 때 · 데이터가 바뀌었을 때 · 10분마다 · 화면으로 되돌아왔을 때.
    토큰은 1시간짜리라 조용히(prompt 없이) 갱신한다 — 이미 권한을 준 계정에서만
    통하고, 안 되면 아무 창도 띄우지 않고 그냥 넘어간다(사용자를 방해하지 않는다). */
-let gcalAutoReady = false, gcalLastAuthTry = 0;
-async function gcalEnsureToken(){
-  if(gcalTokenValid()) return true;
-  if(Date.now() - gcalLastAuthTry < 60000) return false;   // 실패를 1분에 한 번 이상 재시도하지 않는다
-  gcalLastAuthTry = Date.now();
-  return await gcalAuth(true);
-}
+let gcalAutoReady = false;
+// 자동 동기화는 "이미 있는 토큰"으로만 돈다. 여기서 토큰을 새로 받으려 하면
+// Google 이 팝업을 띄우는데, 앱을 열 때마다 창이 깜빡여서 몹시 거슬린다.
+// 토큰이 만료되면 조용히 쉬다가, 사용자가 "지금 동기화"를 누를 때 한 번만 받는다.
+function gcalEnsureToken(){ return gcalTokenValid() || gcalLoadToken(); }
 function gcalPushSoon(){
   const cfg = gcalCfg();
   if(!cfg.enabled || !cfg.clientId) return;
   clearTimeout(window.__gcalTimer);
-  window.__gcalTimer = setTimeout(async ()=>{
-    if(await gcalEnsureToken()) gcalSync(true);
-  }, 3000);
+  window.__gcalTimer = setTimeout(()=>{ if(gcalEnsureToken()) gcalSync(true); }, 3000);
 }
 // 설정이 켜져 있으면 앱이 떠 있는 동안 계속 맞춰준다. 한 번만 걸면 된다.
 function gcalAutoInit(){
@@ -3460,6 +3468,7 @@ function gcalAutoInit(){
   const cfg = gcalCfg();
   if(!cfg.enabled || !cfg.clientId) return;
   gcalAutoReady = true;
+  gcalLoadToken();   // 지난번에 받아둔 토큰이 살아 있으면 창 없이 바로 이어서 보낸다
   gcalPushSoon();
   setInterval(gcalPushSoon, 10 * 60 * 1000);
   document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) gcalPushSoon(); });
@@ -3536,7 +3545,8 @@ function gcalSettingsHtml(){
     </details>
     <span class="hint">이 기능은 웹 주소(${esc(location.host||"GitHub Pages")})에서만 동작합니다 — Artifact 화면에서는 Google 로그인 창을 띄울 수 없습니다.</span>
     <span class="hint">켜두면 <b>버튼을 누르지 않아도 자동으로</b> 보냅니다 — 앱을 열 때, 일지나 일정을 고칠 때, 그리고 앱이 떠 있는 동안 10분마다.
-    다만 Google 권한이 1시간짜리라 <b>앱을 완전히 닫아둔 동안에는 보내지지 않습니다.</b> 그 사이 바뀐 내용은 다음에 앱을 열면 한꺼번에 따라갑니다.</span>
+    <b>자동으로 돌 때는 Google 창을 띄우지 않습니다.</b> 권한이 만료되면 조용히 쉬다가, "지금 동기화"를 한 번 눌러주시면 다시 이어서 돕니다(그때만 Google 창이 잠깐 뜹니다).
+    앱을 완전히 닫아둔 동안 바뀐 내용은 다음에 앱을 열면 따라갑니다.</span>
   </form>`;
 }
 function openSettings(){
