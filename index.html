@@ -1391,7 +1391,8 @@ function latestLog(hid, pred){
   return store.logs.filter(l=>l.hospitalId===hid && !l.deleted && pred(l)).sort(byDateDesc)[0] || null;
 }
 function lastPmDate(hid){ const pm = latestLog(hid, l=>l.type==="PM" || l.countsAsPm); return pm ? pm.date : null; }
-function lastVisitDate(hid){ const l = latestLog(hid, ()=>true); return l ? l.date : null; }
+// Call 은 전화 응대 기록이라 방문이 아니다 — "최근 방문"에서 빼야 한다.
+function lastVisitDate(hid){ const l = latestLog(hid, l=>l.type!=="CALL"); return l ? l.date : null; }
 
 function nextPmInfo(h){
   const interval = Number(h.pmIntervalMonths)||PM_DEFAULT_MONTHS;
