@@ -1617,7 +1617,7 @@ function viewDash(){
       <input type="search" placeholder="제목 · 조치내용 · 부품 검색" data-dashfilter="s" enterkeyhint="search">
       <select data-dashfilter="type"><option value="">전체 구분</option>${Object.entries(TYPES).map(([k,v])=>dopt(k,esc(v.label))).join("")}</select>
       <select data-dashfilter="status"><option value="">전체 상태</option>${Object.entries(STATUS).map(([k,v])=>dopt(k,esc(v.label))).join("")}</select>
-      <select data-dashfilter="hid"><option value="">전체 병원</option>${store.hospitals.slice().sort(koSort).map(h=>dopt(h.id,esc(h.name))).join("")}</select>
+      <select data-dashfilter="hid"><option value="">전체 병원</option>${store.hospitals.slice().sort(koSort).map(h=>dopt(h.id,esc(h.name))).join("")}<optgroup label="병원 외 일정">${PERSONAL_SCHED_OPTS.map(([v,l])=>dopt("p:"+v,esc(l))).join("")}</optgroup></select>
     </div>`;
 
   $("#view").innerHTML = head("대시보드", `${store.hospitals.length}개 병원 관리 중`) + `<div class="wrap">
@@ -1842,7 +1842,9 @@ function viewHospital(){
 function logListFiltered(){
   const q = route.q;
   let list = store.logs.filter(l=>!l.deleted).sort(byDateDesc);
-  if(q.hid) list = list.filter(l=>l.hospitalId===q.hid);
+  // "p:분류" 는 병원이 아니라 병원 외 일정(사무실·교육 등)을 고른 것이다
+  if(q.hid && String(q.hid).startsWith("p:")) list = list.filter(l=>l.personalKind===String(q.hid).slice(2));
+  else if(q.hid) list = list.filter(l=>l.hospitalId===q.hid);
   if(q.type) list = list.filter(l=>l.type===q.type);
   if(q.status==="open") list = list.filter(l=>l.status && l.status!=="done");
   else if(q.status) list = list.filter(l=>l.status===q.status);
@@ -1876,7 +1878,7 @@ function viewLogs(){
       <input type="search" placeholder="제목 · 조치내용 · 부품 검색" value="${esc(q.s||"")}" data-filter="s">
       <select data-filter="type"><option value="">전체 구분</option>${Object.entries(TYPES).map(([k,v])=>opt(k,q.type||"",v.label)).join("")}</select>
       <select data-filter="status"><option value="">전체 상태</option>${Object.entries(STATUS).map(([k,v])=>opt(k,q.status||"",v.label)).join("")}</select>
-      <select data-filter="hid"><option value="">전체 병원</option>${store.hospitals.slice().sort(koSort).map(h=>opt(h.id,q.hid||"",esc(h.name))).join("")}</select>
+      <select data-filter="hid"><option value="">전체 병원</option>${store.hospitals.slice().sort(koSort).map(h=>opt(h.id,q.hid||"",esc(h.name))).join("")}<optgroup label="병원 외 일정">${PERSONAL_SCHED_OPTS.map(([v,l])=>opt("p:"+v,q.hid||"",esc(l))).join("")}</optgroup></select>
       <button class="btn sm" data-action="export" ${logListFiltered().length?"":"disabled"}>CSV 내보내기</button>
     </div>
     <div id="listbody">${logListBody()}</div>
