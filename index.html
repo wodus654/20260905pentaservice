@@ -1113,6 +1113,10 @@ async function initDb(){
       // gcal 문서 자체의 변경은 동기화가 남긴 흔적이라 다시 돌리지 않는다.
       gcalAutoInit();
       if(name !== "gcal" && name !== "photos") gcalPushSoon();
+      // 서버 쪽 동기화용 목록도 맞춰 둔다. gcal 은 cfg(사용 여부·캘린더) 변경도 반영해야 해서 포함하되,
+      // items 를 올린 뒤 돌아오는 스냅샷은 지문이 같아 다시 쓰지 않는다(루프 없음).
+      gcalLoaded.add(name);
+      if(name !== "photos" && name !== "prep") gcalPublishSoon();
     },
     err => { if(err.code==="revoked"||err.code==="unavailable"||err.code==="permission-denied"){ dbState="offline"; render(); } }
   );
@@ -3300,17 +3304,12 @@ async function gcalEnsureCalendar(){
     catch(e){
       // 사용자가 직접 지정한 캘린더면 말없이 새로 만들지 않는다 — 진짜 사유를 그대로 보여준다.
       // (여기서 메시지를 뭉개면 "API 사용 설정 안 됨" 같은 원인이 가려진다)
-      if(cfg.calendarPinned) throw new Error(`지정한 캘린더를 열 수 없습니다 [${e.status||"?"}] ${e.message||e}`);
-      if(e.status !== 404) throw e;   // 지워졌으면 아래에서 다시 만든다
+      throw new Error(`지정한 캘린더를 열 수 없습니다 [${e.status||"?"}] ${e.message||e}`);
     }
   }
-  const list = await gcalFetch("/users/me/calendarList");
-  const found = (list.items||[]).find(c=>c.summary === GCAL_CAL_SUMMARY);
-  if(found){ await gcalSaveCfg({ calendarId: found.id }); return found.id; }
-  const made = await gcalFetch("/calendars", { method:"POST",
-    body: JSON.stringify({ summary: GCAL_CAL_SUMMARY, description:"PENTA SERVICE 앱에서 자동으로 보낸 일정", timeZone:"Asia/Seoul" }) });
-  await gcalSaveCfg({ calendarId: made.id });
-  return made.id;
+  // 캘린더를 몰래 새로 만들지 않는다. 설정이 비었을 때 새 캘린더가 생기면
+  // 공유해 둔 PENTA SERVICE 캘린더가 아닌 엉뚱한 곳으로 일정이 흩어진다.
+  throw new Error("보낼 캘린더가 지정되지 않았습니다 — 설정에서 '내 캘린더에서 고르기'로 고르세요");
 }
 /* 달력에 보이는 것을 그대로 Google 로 보낸다 — 등록한 일정뿐 아니라
    PM·ACR 예정일과 작성된 작업일지까지. sid 는 종류별로 접두사를 붙여 겹치지 않게 한다.
@@ -3360,13 +3359,17 @@ function gcalItems(){
 }
 // 종일 일정이고, 종료일은 하루 뒤(배타적)로 보내야 한다.
 function gcalEventBody(it){
+  const description = (it.desc ? String(it.desc).slice(0, 1500) + "\n\n" : "") + "PENTA SERVICE 에서 자동으로 보낸 일정입니다.";
+  // h = 내용 지문. 서버 쪽 동기화(Apps Script)가 이걸로 "바뀐 것만" 다시 쓴다 —
+  // Google 이 설명 글을 살짝 다듬어 저장해도 지문은 그대로라 매번 다시 쓰는 일이 없다.
+  const h = gcalHash([it.summary, description, it.date, it.end].join("\u0001"));
   return {
     id: gcalEventId(it.sid),
     summary: it.summary,
-    description: (it.desc ? it.desc + "\n\n" : "") + "PENTA SERVICE 에서 자동으로 보낸 일정입니다.",
+    description,
     start: { date: it.date },
     end:   { date: it.end },
-    extendedProperties: { private: { app:"pentaservice", sid: it.sid } },
+    extendedProperties: { private: { app:"pentaservice", sid: it.sid, h } },
     source: { title:"PENTA SERVICE", url: location.origin + location.pathname },
   };
 }
@@ -3474,6 +3477,7 @@ function gcalEnsureToken(){ return gcalTokenValid() || gcalLoadToken(); }
 function gcalPushSoon(){
   const cfg = gcalCfg();
   if(!cfg.enabled || !cfg.clientId) return;
+  if(gcalAgentActive()) return;   // 서버 쪽 동기화가 돌고 있으면 앱이 따로 보낼 필요가 없다
   clearTimeout(window.__gcalTimer);
   window.__gcalTimer = setTimeout(()=>{ if(gcalEnsureToken()) gcalSync(true); }, 3000);
 }
@@ -3488,6 +3492,104 @@ function gcalAutoInit(){
   setInterval(gcalPushSoon, 10 * 60 * 1000);
   document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) gcalPushSoon(); });
   window.addEventListener("online", gcalPushSoon);
+}
+/* 서버 쪽 자동 동기화(Google Apps Script)용 목록 올리기.
+   앱 안에서 Google 권한으로 직접 쓰는 방식은 권한이 1시간이면 끝나 사실상 멈춰 있었다.
+   그래서 앱은 "보낼 일정 목록"을 Firestore(gcal/items)에 올려두기만 하고,
+   Google 서버에서 10분마다 도는 스크립트(apps-script/PentaCalendarSync.gs)가
+   그 목록을 읽어 캘린더에 맞춘다 — 앱이 꺼져 있어도, 팝업 없이 돈다. */
+const GCAL_NEEDS = ["hospitals","logs","schedule","gcal"];
+const gcalLoaded = new Set();
+let gcalPubTimer = null;
+function gcalPublishSoon(){
+  clearTimeout(gcalPubTimer);
+  gcalPubTimer = setTimeout(gcalPublishItems, 2500);
+}
+async function gcalPublishItems(){
+  const cfg = gcalCfg();
+  if(!cfg.enabled) return;
+  // 컬렉션이 덜 읽힌 상태에서 올리면 스크립트가 "없어진 일정"으로 보고 캘린더에서 지운다.
+  // 필요한 것이 전부 한 번 이상 읽힌 뒤에만 올린다.
+  if(!GCAL_NEEDS.every(n=>gcalLoaded.has(n))) return;
+  const bodies = gcalItems().map(gcalEventBody).map(b=>{ const { source, ...rest } = b; return rest; });
+  const prev = store.gcal.find(x=>x.id==="items");
+  // 안전장치: 잘 차 있던 목록이 갑자기 텅 비면 올리지 않는다(통째로 지워지는 사고 방지)
+  if(!bodies.length && prev && Number(prev.count) > 20) return;
+  const json = JSON.stringify(bodies);
+  const hash = gcalHash(json + "|" + (cfg.calendarId||""));
+  if(prev && prev.hash === hash) return;
+  await writeDocRaw("gcal", {
+    id: "items", json, hash, calendarId: cfg.calendarId || "",
+    count: bodies.length, publishedAt: new Date().toISOString(),
+  });
+}
+// 서버 쪽 동기화(Apps Script)가 최근 30분 안에 돌았으면 "동작 중"으로 본다.
+function gcalAgent(){ return store.gcal.find(x=>x.id==="agent") || null; }
+function gcalAgentActive(){
+  const a = gcalAgent();
+  return !!(a && a.lastRun && Date.now() - new Date(a.lastRun).getTime() < 30 * 60000 && !a.lastError);
+}
+function gcalAgoText(iso){
+  if(!iso) return "";
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if(m < 1) return "방금";
+  if(m < 60) return m + "분 전";
+  const h = Math.round(m / 60);
+  return h < 48 ? h + "시간 전" : Math.round(h / 24) + "일 전";
+}
+function gcalAgentHtml(){
+  if(!canEdit()) return "";
+  const a = gcalAgent();
+  const items = store.gcal.find(x=>x.id==="items");
+  let status;
+  if(!a || !a.lastRun){
+    status = `<div class="chip muted">아직 설치되지 않았습니다</div>`;
+  } else if(a.lastError){
+    status = `<div class="chip overdue">오류 — ${esc(gcalAgoText(a.lastRun))} 실행</div>
+      <div class="hint" style="color:var(--crit)">${esc(a.lastError)}</div>`;
+  } else if(gcalAgentActive()){
+    status = `<div class="chip done">동작 중 — 마지막 실행 ${esc(gcalAgoText(a.lastRun))} · 전체 ${esc(String(a.total||0))}건</div>`;
+  } else {
+    status = `<div class="chip soon">멈춤 — 마지막 실행 ${esc(gcalAgoText(a.lastRun))}</div>
+      <div class="hint">10분마다 돌아야 하는데 30분 넘게 소식이 없습니다. 아래 설치 5번(install 실행)을 한 번 더 해주세요.</div>`;
+  }
+  const installed = !!(a && a.lastRun);
+  return `<div class="card formcard" id="gasbox">
+    <h3>항상 자동 동기화 <span class="hint2">앱을 꺼둬도 동작</span></h3>
+    ${status}
+    <div class="hint">앱이 올려둔 목록: ${items ? `${esc(String(items.count||0))}건 (${esc(gcalAgoText(items.publishedAt))})` : "아직 없음"}</div>
+    <p class="hint" style="margin:6px 0 0">Google 서버에서 10분마다 돌면서 PENTA SERVICE 캘린더를 맞춰주는 작은 프로그램입니다.
+      본인 Google 계정 권한으로 돌아서 <b>앱에 팝업도, 1시간 만료도 없습니다.</b> 처음 한 번만 설치하면 됩니다.</p>
+    <details ${installed ? "" : "open"} style="margin-top:6px">
+      <summary style="cursor:pointer;font-weight:600;font-size:13px">설치 방법 (PC에서, 5분)</summary>
+      <ol style="font-size:13px;color:var(--ink-2);padding-left:18px;line-height:1.75">
+        <li>아래 <b>[코드 복사]</b>를 누릅니다.</li>
+        <li><b>script.new</b> 를 주소창에 쳐서 엽니다. (<b>wodus654@gmail.com</b> 으로 로그인된 상태여야 합니다)</li>
+        <li>원래 있던 코드를 모두 지우고 붙여넣은 뒤 <b>저장</b>(Ctrl+S)합니다. 프로젝트 이름은 아무거나 괜찮습니다.</li>
+        <li>왼쪽 <b>서비스 +</b> 를 눌러 <b>Google Calendar API</b> 를 고르고 <b>추가</b>합니다.</li>
+        <li>위쪽 함수 목록에서 <b>install</b> 을 고르고 <b>▶ 실행</b>. 권한 창이 뜨면 허용합니다
+          ("확인되지 않은 앱"이 나오면 <b>고급 → 이동</b>).</li>
+      </ol>
+      <div class="hint">끝나면 이 칸이 몇 분 안에 <b>"동작 중"</b>으로 바뀝니다.</div>
+    </details>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <button type="button" class="btn sm primary" data-action="gas-copy">코드 복사</button>
+      <button type="button" class="btn sm" data-action="gas-open">script.new 열기</button>
+    </div>
+  </div>`;
+}
+async function gcalCopyScript(){
+  const src = (document.getElementById("gas-src")||{}).textContent || "";
+  if(!src.trim()){ toast("코드를 찾지 못했습니다"); return; }
+  try { await navigator.clipboard.writeText(src.replace(/^\n/, "")); toast("코드를 복사했습니다 — script.new 에 붙여넣으세요"); }
+  catch(e){
+    // 클립보드 권한이 막힌 브라우저용 — 텍스트를 보여주고 직접 복사하게 한다
+    const ta = document.createElement("textarea");
+    ta.value = src; ta.style.cssText = "width:100%;height:160px;font-family:var(--mono);font-size:11px;margin-top:8px";
+    const box = $("#gasbox"); if(box) box.appendChild(ta);
+    ta.focus(); ta.select();
+    toast("자동 복사가 막혀 있어 아래 칸을 길게 눌러 복사하세요");
+  }
 }
 /* ---- settings ---- */
 // 캘린더를 이름으로 고르게 한다. ID만 손으로 넣다 보면 엉뚱한 캘린더(개인 일정 등)로
@@ -3526,7 +3628,7 @@ function gcalSettingsHtml(){
   const on = !!cfg.enabled && !!cfg.clientId;
   const last = cfg.lastSync ? new Date(cfg.lastSync).toLocaleString("ko-KR") : "아직 보낸 적 없음";
   return `<form id="gcalform" class="card formcard">
-    <h3>Google 캘린더로 내보내기</h3>
+    <h3>보낼 캘린더 · 직접 동기화</h3>
     <p class="hint" style="margin:0 0 4px">삼성 캘린더는 외부 앱이 직접 쓸 수 없습니다. 대신 Google 캘린더에 "${esc(GCAL_CAL_SUMMARY)}" 캘린더를 만들어 일정을 보내면,
     휴대폰에 그 Google 계정이 등록돼 있는 한 삼성 캘린더에 그대로 나타나고 가족 공유도 됩니다.</p>
     <div class="field"><label>Google 클라이언트 ID</label>
@@ -3587,6 +3689,7 @@ function openSettings(){
     </div>
     <button type="submit" class="btn primary">저장</button>
   </form>
+  ${gcalAgentHtml()}
   ${gcalSettingsHtml()}
   <div class="card formcard">
     <h3>일정 자동 계산 규칙</h3>
@@ -3622,12 +3725,16 @@ function openSettings(){
     }
     const typed = gcalParseCalendarId(fd.get("calendarId"));
     const prev = gcalCfg();
-    const patch = { clientId, enabled, sendDue: !!fd.get("sendDue"), sendLogs: !!fd.get("sendLogs") };
-    if(typed !== (prev.calendarId||"")){ patch.calendarId = typed; patch.calendarPinned = !!typed; }
+    // 칸이 비어 있으면 "그대로 둔다"로 본다. 빈 칸으로 저장했다가 클라이언트 ID·캘린더 ID 가
+    // 통째로 지워져 동기화가 멈춘 일이 실제로 있었다. 바꾸려면 새 값을 넣거나 목록에서 고른다.
+    const patch = { enabled, sendDue: !!fd.get("sendDue"), sendLogs: !!fd.get("sendLogs") };
+    if(clientId) patch.clientId = clientId;
+    if(typed && typed !== (prev.calendarId||"")){ patch.calendarId = typed; patch.calendarPinned = true; }
     await gcalSaveCfg(patch);
     toast("저장되었습니다");
     // 켠 직후에는 바로 한 번 맞춰준다(이때 Google 로그인 창이 뜬다)
-    if(enabled && clientId) gcalSync(false);
+    if(enabled && (clientId || prev.clientId) && !gcalAgentActive()) gcalSync(false);
+    gcalPublishSoon();
   });
 }
 function getUserLabel(){ return "이 기기 설정으로 저장됩니다"; }
@@ -3983,6 +4090,8 @@ document.addEventListener("click", e=>{
     return; }
   if(act==="export"){ const list = currentLogList(); return exportCsv(list); }
   if(act==="gcal-pick"){ gcalShowPicker(); return; }
+  if(act==="gas-copy"){ gcalCopyScript(); return; }
+  if(act==="gas-open"){ window.open("https://script.new", "_blank"); return; }
   if(act==="gcal-cleanup"){ gcalRunCleanup(); return; }
   if(act==="gcal-sync"){ gcalSync(false); return; }
   if(act==="gcal-open"){ window.open("https://calendar.google.com/calendar/r", "_blank"); return; }
@@ -4183,4 +4292,128 @@ initDb();
 setInterval(()=>{ pruneDonePrep(); pruneTrash(); if(parseHash().path==="dash") render(); }, 60000);
 
 })();
+</script>
+
+<!-- 서버 쪽 자동 동기화 스크립트 원본 — 설정 화면의 "코드 복사"가 이걸 그대로 복사한다.
+     apps-script/PentaCalendarSync.gs 와 같은 내용이어야 한다. -->
+<script type="text/plain" id="gas-src">
+/**
+ * PENTA SERVICE → Google 캘린더 자동 동기화 (Google Apps Script)
+ *
+ * 앱은 보낼 일정 목록을 Firestore(gcal/items)에 올려두기만 한다.
+ * 이 스크립트가 Google 서버에서 10분마다 그 목록을 읽어 캘린더에 그대로 맞춘다.
+ * 앱이 꺼져 있어도 돌고, 본인 Google 계정 권한으로 쓰기 때문에 팝업·1시간 만료가 없다.
+ *
+ * 처음 한 번만: 왼쪽 "서비스 +" 에서 Google Calendar API 를 추가하고,
+ * 위쪽 함수 선택에서 install 을 골라 실행 → 권한 허용.
+ */
+var PROJECT = 'pentaservice-3de4c';
+var API_KEY = 'AIzaSyBK-VAiq9b5ugWFxjefQ4-t-zgkj6IJgfk';
+var BASE = 'https://firestore.googleapis.com/v1/projects/' + PROJECT + '/databases/(default)/documents';
+
+/** 10분마다 syncNow 를 돌리는 트리거를 건다(여러 번 실행해도 하나만 남는다). */
+function install() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'syncNow') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('syncNow').timeBased().everyMinutes(10).create();
+  syncNow();
+}
+
+/** 자동 동기화를 끈다. */
+function uninstall() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'syncNow') ScriptApp.deleteTrigger(t);
+  });
+}
+
+function syncNow() {
+  var started = new Date();
+  var pushed = 0, removed = 0, total = 0, err = '';
+  try {
+    var doc = fetchDoc_('gcal/items');
+    if (!doc) throw new Error('앱이 아직 일정 목록을 올리지 않았습니다 — 앱을 한 번 열어주세요');
+    var calId = str_(doc.fields.calendarId);
+    if (!calId) throw new Error('보낼 캘린더가 지정되지 않았습니다 — 앱 설정에서 캘린더를 고르세요');
+    var desired = JSON.parse(str_(doc.fields.json) || '[]');
+    total = desired.length;
+    var existing = listOurs_(calId);
+    // 안전장치: 목록이 통째로 비어 오면(앱이 덜 읽힌 상태 등) 캘린더를 지우지 않는다
+    if (desired.length === 0 && Object.keys(existing).length > 20) {
+      throw new Error('보낼 목록이 비어 있어 삭제를 멈췄습니다(안전장치)');
+    }
+    var want = {};
+    desired.forEach(function (b) {
+      want[b.id] = true;
+      var ex = existing[b.id];
+      if (ex && hashOf_(ex) === hashOf_(b)) return;   // 내용이 같으면 건너뛴다
+      upsert_(calId, b, !!ex);
+      pushed++;
+    });
+    Object.keys(existing).forEach(function (id) {
+      if (want[id]) return;
+      try { Calendar.Events.remove(calId, id); removed++; } catch (e) {}
+    });
+  } catch (e) {
+    err = String((e && e.message) || e);
+  }
+  writeAgent_({
+    lastRun: started.toISOString(), lastError: err,
+    pushed: pushed, removed: removed, total: total
+  });
+  if (err) console.error(err);
+  else console.log('전체 ' + total + '건, 올림 ' + pushed + '건, 삭제 ' + removed + '건');
+}
+
+// 우리 앱이 보낸 이벤트만(app=pentaservice 표시가 붙은 것) 가져온다 — 다른 일정은 건드리지 않는다
+function listOurs_(calId) {
+  var out = {}, pageToken = null;
+  do {
+    var opt = { privateExtendedProperty: 'app=pentaservice', maxResults: 2500, showDeleted: false };
+    if (pageToken) opt.pageToken = pageToken;
+    var res = Calendar.Events.list(calId, opt);
+    (res.items || []).forEach(function (ev) { out[ev.id] = ev; });
+    pageToken = res.nextPageToken;
+  } while (pageToken);
+  return out;
+}
+
+function hashOf_(ev) {
+  var p = ev.extendedProperties && ev.extendedProperties['private'];
+  return (p && p.h) || '';
+}
+
+function upsert_(calId, b, exists) {
+  if (exists) { Calendar.Events.update(b, calId, b.id); return; }
+  try {
+    Calendar.Events.insert(b, calId);
+  } catch (e) {
+    // 예전에 지웠던 같은 id 가 '취소됨' 으로 남아 있으면 insert 가 막힌다 — 되살린다
+    var r = JSON.parse(JSON.stringify(b));
+    r.status = 'confirmed';
+    Calendar.Events.update(r, calId, b.id);
+  }
+}
+
+function fetchDoc_(path) {
+  var res = UrlFetchApp.fetch(BASE + '/' + path + '?key=' + API_KEY, { muteHttpExceptions: true });
+  var code = res.getResponseCode();
+  if (code === 404) return null;
+  if (code !== 200) throw new Error('Firestore 읽기 실패 (' + code + ')');
+  return JSON.parse(res.getContentText());
+}
+
+function str_(v) { return v && v.stringValue != null ? v.stringValue : ''; }
+
+// 앱 설정 화면에 "마지막 실행 시각·오류"를 보여주려고 Firestore(gcal/agent)에 남긴다
+function writeAgent_(o) {
+  var fields = {};
+  Object.keys(o).forEach(function (k) {
+    fields[k] = (typeof o[k] === 'number') ? { integerValue: String(o[k]) } : { stringValue: String(o[k]) };
+  });
+  UrlFetchApp.fetch(BASE + '/gcal/agent?key=' + API_KEY, {
+    method: 'patch', contentType: 'application/json',
+    payload: JSON.stringify({ fields: fields }), muteHttpExceptions: true
+  });
+}
 </script>
